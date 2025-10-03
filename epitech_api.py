@@ -1,7 +1,8 @@
 import requests
 import json
 import os
-from datetime import datetime
+import base64
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 
@@ -57,15 +58,49 @@ class EpitechAPI:
             print(f"Erreur lors de la récupération des détails du test {run_id}: {e}")
             return None
     
+    def _generate_progress_bar(self, passed: int, total: int, length: int = 20) -> str:
+        """
+        Génère une barre de progression visuelle
+        
+        Args:
+            passed: Nombre de tests réussis
+            total: Nombre total de tests
+            length: Longueur de la barre (défaut: 20)
+            
+        Returns:
+            Barre de progression avec pourcentage
+        """
+        if total == 0:
+            return "⬜" * length + " 0%"
+        
+        percentage = (passed / total) * 100
+        filled_length = int(length * passed / total)
+        
+        # Choix des emoji selon le pourcentage
+        if percentage >= 90:
+            fill_char = "🟩"  # Vert - Excellent
+        elif percentage >= 70:
+            fill_char = "🟨"  # Jaune - Bien
+        elif percentage >= 50:
+            fill_char = "🟧"  # Orange - Moyen
+        else:
+            fill_char = "🟥"  # Rouge - Insuffisant
+        
+        empty_char = "⬜"
+        
+        # Construction de la barre
+        bar = fill_char * filled_length + empty_char * (length - filled_length)
+        return f"{bar} {percentage:.1f}%"
+
     def format_project_summary(self, project_data: Dict) -> str:
         """
-        Formate un résumé d'un projet pour l'affichage Discord
+        Formate un résumé d'un projet pour l'affichage Discord avec barre de progression
         
         Args:
             project_data: Données d'un projet
             
         Returns:
-            Résumé formaté du projet
+            Résumé formaté du projet avec barre de progression visuelle
         """
         project = project_data.get("project", {})
         results = project_data.get("results", {})
@@ -80,6 +115,9 @@ class EpitechAPI:
         # Calcul du pourcentage de réussite
         success_rate = (passed_tests / total_tests * 100) if total_tests > 0 else 0
         
+        # Génération de la barre de progression
+        progress_bar = self._generate_progress_bar(passed_tests, total_tests)
+        
         # Formatage de la date
         date_str = project_data.get("date", "")
         if date_str:
@@ -88,11 +126,12 @@ class EpitechAPI:
         else:
             formatted_date = "Date inconnue"
         
-        # Création du résumé
+        # Création du résumé avec barre de progression
         summary = f"""
 **{project.get('name', 'Projet inconnu')}** ({project.get('module', {}).get('code', 'Module inconnu')})
 📅 **Date:** {formatted_date}
 📊 **Tests:** {passed_tests}/{total_tests} réussis ({success_rate:.1f}%)
+📈 **Progression:** {progress_bar}
 """
         
         if crashed_tests > 0:
@@ -101,13 +140,22 @@ class EpitechAPI:
         if mandatory_failed > 0:
             summary += f"❌ **Mandatory Failed:** {mandatory_failed}\n"
         
-        # Ajout des détails des tâches
+        # Ajout des détails des tâches (simple statut réussi/échoué)
         if skills:
             summary += "\n**Détail des tâches:**\n"
             for task_name, task_data in skills.items():
                 passed = task_data.get("passed", 0)
                 count = task_data.get("count", 0)
-                status = "✅" if passed == count else "❌"
+                crashed = task_data.get("crashed", 0)
+                
+                # Status principal - soit réussi soit échoué
+                if passed == count and count > 0:
+                    status = "✅"
+                elif crashed > 0:
+                    status = "💥"
+                else:
+                    status = "❌"
+                
                 summary += f"{status} {task_name}: {passed}/{count}\n"
         
         return summary
@@ -280,3 +328,69 @@ class EpitechAPI:
         except Exception as e:
             print(f"❌ Erreur lors de la sauvegarde: {e}")
             return None
+    
+    def get_token_info(self) -> Dict:
+        """Analyse le token Bearer et retourne les informations d'expiration"""
+        try:
+            if not self.bearer_token:
+                return {"error": "Aucun token configuré"}
+            
+            # Le token est déjà un JWT, pas besoin de séparer "Bearer"
+            jwt_token = self.bearer_token
+            
+            # Décoder le JWT (sans vérification de signature)
+            # Un JWT a 3 parties séparées par des points
+            parts = jwt_token.split('.')
+            if len(parts) != 3:
+                return {"error": "Token JWT invalide"}
+            
+            # Décoder le payload (partie 2)
+            # Ajouter le padding nécessaire pour base64
+            payload = parts[1]
+            payload += '=' * (4 - len(payload) % 4)
+            
+            decoded_bytes = base64.urlsafe_b64decode(payload)
+            payload_data = json.loads(decoded_bytes.decode('utf-8'))
+            
+            # Extraire les informations d'expiration
+            exp_timestamp = payload_data.get('exp')
+            if not exp_timestamp:
+                return {"error": "Pas d'information d'expiration dans le token"}
+            
+            # Convertir le timestamp en datetime
+            exp_datetime = datetime.fromtimestamp(exp_timestamp, tz=timezone.utc)
+            now = datetime.now(timezone.utc)
+            
+            # Calculer le temps restant
+            time_remaining = exp_datetime - now
+            
+            if now > exp_datetime:
+                days, hours, minutes, seconds = 0, 0, 0, 0
+            else:
+                days = time_remaining.days
+                total_seconds = time_remaining.seconds
+                hours = total_seconds // 3600
+                minutes = (total_seconds % 3600) // 60
+                seconds = total_seconds % 60
+            
+            result = {
+                "expires_at": exp_datetime.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "is_expired": now > exp_datetime,
+                "days_remaining": days,
+                "hours_remaining": hours,
+                "minutes_remaining": minutes,
+                "seconds_remaining": seconds
+            }
+            
+            # Ajouter des informations supplémentaires du payload si disponibles
+            if 'iat' in payload_data:
+                issued_at = datetime.fromtimestamp(payload_data['iat'], tz=timezone.utc)
+                result["issued_at"] = issued_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+            
+            if 'sub' in payload_data:
+                result["subject"] = payload_data['sub']
+                
+            return result
+            
+        except Exception as e:
+            return {"error": f"Erreur lors de l'analyse du token: {str(e)}"}

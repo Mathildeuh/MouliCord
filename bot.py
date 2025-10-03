@@ -63,16 +63,47 @@ async def get_moulinette_results(ctx, limit: int = 5):
             await ctx.send("❌ Aucun résultat trouvé ou erreur lors de la récupération.")
             return
         
+        # Calculer les statistiques globales
+        total_projects = len(results)
+        total_tests = 0
+        total_passed = 0
+        
+        for result in results:
+            skills = result.get("results", {}).get("skills", {})
+            total_tests += sum(skill.get("count", 0) for skill in skills.values())
+            total_passed += sum(skill.get("passed", 0) for skill in skills.values())
+        
+        global_rate = (total_passed / total_tests * 100) if total_tests > 0 else 0
+        global_progress = epitech_api._generate_progress_bar(total_passed, total_tests, 15)
+        
         embed = discord.Embed(
             title="🏫 Résultats de la Moulinette Epitech",
-            color=discord.Color.blue(),
+            description=f"📊 **Global:** {total_passed}/{total_tests} tests ({global_rate:.1f}%)\n📈 {global_progress}",
+            color=discord.Color.green() if global_rate >= 70 else discord.Color.orange() if global_rate >= 50 else discord.Color.red(),
             timestamp=datetime.now()
         )
         
         for i, result in enumerate(results, 1):
             summary = epitech_api.format_project_summary(result)
+            project_name = result.get('project', {}).get('name', 'Projet inconnu')
+            
+            # Calculer le taux de réussite pour choisir l'emoji
+            skills = result.get("results", {}).get("skills", {})
+            project_total = sum(skill.get("count", 0) for skill in skills.values())
+            project_passed = sum(skill.get("passed", 0) for skill in skills.values())
+            project_rate = (project_passed / project_total * 100) if project_total > 0 else 0
+            
+            if project_rate >= 90:
+                emoji = "🟢"
+            elif project_rate >= 70:
+                emoji = "🟡"
+            elif project_rate >= 50:
+                emoji = "🟠"
+            else:
+                emoji = "🔴"
+            
             embed.add_field(
-                name=f"#{i} - {result.get('project', {}).get('name', 'Projet inconnu')}",
+                name=f"{emoji} #{i} - {project_name}",
                 value=summary[:1024],  # Limite Discord pour les fields
                 inline=False
             )
@@ -286,6 +317,103 @@ async def clear_storage_command(ctx):
         await ctx.send("⏰ Délai d'attente dépassé - opération annulée")
 
 
+@bot.command(name='token')
+async def check_token(ctx):
+    """Vérifie les informations du token Epitech et sa date d'expiration"""
+    token_info = epitech_api.get_token_info()
+    
+    if "error" in token_info:
+        embed = discord.Embed(
+            title="❌ Erreur Token",
+            description=token_info["error"],
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+        return
+    
+    # Déterminer la couleur selon l'état du token
+    if token_info["is_expired"]:
+        color = discord.Color.red()
+        status_emoji = "🔴"
+        status_text = "Expiré"
+    elif token_info["days_remaining"] <= 1:
+        color = discord.Color.orange()
+        status_emoji = "🟠"
+        status_text = "Expire bientôt"
+    elif token_info["days_remaining"] <= 7:
+        color = discord.Color.yellow()
+        status_emoji = "🟡"
+        status_text = "Expire cette semaine"
+    else:
+        color = discord.Color.green()
+        status_emoji = "🟢"
+        status_text = "Valide"
+    
+    embed = discord.Embed(
+        title=f"{status_emoji} Token Epitech - {status_text}",
+        color=color
+    )
+    
+    embed.add_field(
+        name="📅 Date d'expiration",
+        value=token_info["expires_at"],
+        inline=True
+    )
+    
+    if not token_info["is_expired"]:
+        time_parts = []
+        
+        if token_info["days_remaining"] > 0:
+            time_parts.append(f"{token_info['days_remaining']} jours")
+        
+        if token_info["hours_remaining"] > 0:
+            time_parts.append(f"{token_info['hours_remaining']} heures")
+        
+        if token_info["minutes_remaining"] > 0:
+            time_parts.append(f"{token_info['minutes_remaining']} minutes")
+        
+        if token_info["seconds_remaining"] > 0 and len(time_parts) < 2:
+            time_parts.append(f"{token_info['seconds_remaining']} secondes")
+        
+        time_display = ", ".join(time_parts) if time_parts else "Moins d'une seconde"
+        
+        embed.add_field(
+            name="⏰ Temps restant",
+            value=time_display,
+            inline=True
+        )
+    
+    if "issued_at" in token_info:
+        embed.add_field(
+            name="🔧 Émis le",
+            value=token_info["issued_at"],
+            inline=True
+        )
+    
+    if "subject" in token_info:
+        embed.add_field(
+            name="👤 Utilisateur",
+            value=token_info["subject"],
+            inline=True
+        )
+    
+    # Ajouter des conseils selon l'état
+    if token_info["is_expired"]:
+        embed.add_field(
+            name="⚠️ Action requise",
+            value="Le token a expiré. Veuillez le renouveler et mettre à jour la configuration.",
+            inline=False
+        )
+    elif token_info["days_remaining"] <= 7:
+        embed.add_field(
+            name="💡 Conseil",
+            value="Le token expire bientôt. Pensez à le renouveler prochainement.",
+            inline=False
+        )
+    
+    await ctx.send(embed=embed)
+
+
 @tasks.loop(minutes=5)
 async def check_new_results():
     """Vérifie périodiquement s'il y a de nouveaux résultats"""
@@ -395,6 +523,12 @@ async def help_command(ctx):
     embed.add_field(
         name="!clear_storage",
         value="Vide le stockage (admin)",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="!token",
+        value="Vérifie l'expiration du token Epitech",
         inline=False
     )
     

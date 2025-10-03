@@ -6,7 +6,8 @@ Bot Discord pour surveiller automatiquement les résultats de la moulinette Epit
 
 - 🚨 **Surveillance automatique** des nouveaux résultats (toutes les 5 min)
 - 💾 **Stockage intelligent** - évite les doublons avec historique JSON
-- 📊 Consultation des résultats et statistiques détaillées
+- 📊 **Barres de progression visuelles** avec pourcentages automatiques
+- 🎨 **Indicateurs colorés** par niveau de réussite (🟩🟨🟧🟥)
 - 🔍 Détails complets des tests avec traces d'exécution
 - ⚡ Notifications instantanées uniquement des nouveaux résultatst Discord pour Moulinette Epitech
 
@@ -50,13 +51,22 @@ pip install -r requirements.txt && python bot.py
 
 | Commande | Description |
 |----------|-------------|
-| `!mouli [nb]` | Derniers résultats (défaut: 5) |
+| `!mouli [nb]` | Derniers résultats avec barres de progression |
 | `!details <id>` | Détails complets d'un test |
 | `!watch` | Active/désactive surveillance |
 | `!status` | Statut de la surveillance |
 | `!stats` | Statistiques du stockage |
 | `!backup` | Sauvegarde du stockage |
+| `!token` | Vérifier l'expiration du token Epitech |
 | `!help_mouli` | Aide complète |
+
+### 📊 Barres de progression
+- **🟩 Vert** : 90-100% (Excellent)
+- **🟨 Jaune** : 70-89% (Bien)  
+- **🟧 Orange** : 50-69% (Moyen)
+- **🟥 Rouge** : 0-49% (Insuffisant)
+- **Projets** : 🟢🟡🟠🔴 + barre de progression globale
+- **Tâches** : ✅ réussi / ❌ échoué / 💥 crashé (simple statut)
 
 ## 📁 Fichiers
 
