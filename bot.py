@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from epitech_api import EpitechAPI
+from token_refresher import auto_refresh_token
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -414,6 +415,146 @@ async def check_token(ctx):
     await ctx.send(embed=embed)
 
 
+@bot.command(name='refresh_token')
+async def refresh_token_command(ctx, headless: bool = True):
+    """Récupère automatiquement un nouveau token via Selenium"""
+    
+    # Message de début
+    start_embed = discord.Embed(
+        title="🔄 Récupération du token en cours...",
+        description="Lancement de l'automatisation Selenium avec persistance Office\nCela peut prendre 30-60 secondes.",
+        color=discord.Color.blue()
+    )
+    start_embed.add_field(
+        name="📋 Étapes",
+        value="1️⃣ Vérification session Office existante\n2️⃣ Ouverture du navigateur\n3️⃣ Navigation vers myresults.epitest.eu\n4️⃣ Clic sur 'Log In' (si nécessaire)\n5️⃣ Capture du token\n6️⃣ Sauvegarde de la session",
+        inline=False
+    )
+    
+    start_embed.add_field(
+        name="🔐 Persistance Office Permanente",
+        value="Votre session Office est sauvegardée définitivement - plus besoin de re-authentifier !",
+        inline=False
+    )
+    
+    if not headless:
+        start_embed.add_field(
+            name="👀 Mode visible",
+            value="Le navigateur va s'ouvrir - vous devrez peut-être vous authentifier manuellement",
+            inline=False
+        )
+    
+    message = await ctx.send(embed=start_embed)
+    
+    try:
+        # Lancer la récupération automatique
+        result = auto_refresh_token(headless=headless, update_env=True)
+        
+        if result["success"]:
+            # Succès
+            success_embed = discord.Embed(
+                title="✅ Token récupéré avec succès !",
+                color=discord.Color.green()
+            )
+            
+            success_embed.add_field(
+                name="🎯 Status",
+                value=result["message"],
+                inline=False
+            )
+            
+            if result.get("url"):
+                success_embed.add_field(
+                    name="🔗 URL finale",
+                    value=f"`{result['url'][:50]}...`" if len(result['url']) > 50 else f"`{result['url']}`",
+                    inline=False
+                )
+            
+            if result.get("env_updated"):
+                success_embed.add_field(
+                    name="⚙️ Configuration",
+                    value="✅ Fichier .env mis à jour automatiquement",
+                    inline=False
+                )
+                
+                # Recharger l'API avec le nouveau token
+                global epitech_api
+                new_token = result["token"]
+                epitech_api = EpitechAPI(new_token, "results_history.json")
+                
+                success_embed.add_field(
+                    name="🔄 Rechargement",
+                    value="✅ API rechargée avec le nouveau token",
+                    inline=False
+                )
+            
+            # Afficher quelques caractères du token (sécurisé)
+            token_preview = f"{result['token'][:10]}...{result['token'][-10:]}"
+            success_embed.add_field(
+                name="🔑 Token (aperçu)",
+                value=f"`{token_preview}`",
+                inline=False
+            )
+            
+            success_embed.add_field(
+                name="💡 Conseil",
+                value="Utilisez `!token` pour vérifier l'expiration du nouveau token",
+                inline=False
+            )
+            
+            await message.edit(embed=success_embed)
+            
+        else:
+            # Erreur
+            error_embed = discord.Embed(
+                title="❌ Échec de la récupération du token",
+                color=discord.Color.red()
+            )
+            
+            error_embed.add_field(
+                name="🚫 Erreur",
+                value=result.get("error", "Erreur inconnue"),
+                inline=False
+            )
+            
+            error_embed.add_field(
+                name="📝 Message",
+                value=result.get("message", "Aucun détail disponible"),
+                inline=False
+            )
+            
+            if result.get("url"):
+                error_embed.add_field(
+                    name="🔗 URL au moment de l'erreur",
+                    value=f"`{result['url']}`",
+                    inline=False
+                )
+            
+            error_embed.add_field(
+                name="🛠️ Solutions possibles",
+                value="• Vérifiez votre connexion internet\n• Essayez `!refresh_token False` (mode visible)\n• Vérifiez que Chrome/Chromium est installé\n• L'authentification peut nécessiter une interaction manuelle",
+                inline=False
+            )
+            
+            await message.edit(embed=error_embed)
+            
+    except Exception as e:
+        # Erreur critique
+        critical_embed = discord.Embed(
+            title="💥 Erreur critique",
+            description=f"Une erreur inattendue s'est produite:\n```{str(e)}```",
+            color=discord.Color.dark_red()
+        )
+        
+        critical_embed.add_field(
+            name="🔧 Vérifications",
+            value="• Selenium est-il installé ? (`pip install selenium webdriver-manager`)\n• Chrome/Chromium est-il disponible ?\n• Permissions d'écriture sur le fichier .env ?",
+            inline=False
+        )
+        
+        await message.edit(embed=critical_embed)
+
+
 @tasks.loop(minutes=5)
 async def check_new_results():
     """Vérifie périodiquement s'il y a de nouveaux résultats"""
@@ -529,6 +670,12 @@ async def help_command(ctx):
     embed.add_field(
         name="!token",
         value="Vérifie l'expiration du token Epitech",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="!refresh_token [headless]",
+        value="Récupère automatiquement un nouveau token via Selenium (avec persistance Office)",
         inline=False
     )
     

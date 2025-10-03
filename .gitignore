@@ -13,3 +13,5 @@ venv/
 # MouliCord
 results_history.json
 results_backup_*.json
+
+chrome_profile_epitech/
