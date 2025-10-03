@@ -144,6 +144,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# MouliCord storage files
+results_history.json
+results_backup_*.json
+
 # Spyder project settings
 .spyderproject
 .spyproject
