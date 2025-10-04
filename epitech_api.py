@@ -223,7 +223,12 @@ class EpitechAPI:
         """Charge les données du fichier de stockage"""
         try:
             with open(self.storage_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                # Si le fichier contient une liste au lieu d'un dict, le réinitialiser
+                if isinstance(data, list):
+                    print("⚠️  Format de stockage incorrect (liste), réinitialisation...")
+                    return {"results": [], "last_update": None}
+                return data
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"⚠️  Erreur lors du chargement du stockage: {e}")
             return {"results": [], "last_update": None}
@@ -420,3 +425,162 @@ class EpitechAPI:
             
         except Exception as e:
             return {"error": f"Erreur lors de l'analyse du token: {str(e)}"}
+    
+    def check_token_expiration(self) -> Dict:
+        """
+        Vérifie l'expiration du token et retourne des informations formatées
+        
+        Returns:
+            Dict avec les informations d'expiration formatées pour Discord
+        """
+        token_info = self.get_token_info()
+        
+        if "error" in token_info:
+            return {
+                "valid": False,
+                "error": token_info["error"]
+            }
+        
+        is_expired = token_info["is_expired"]
+        
+        if is_expired:
+            return {
+                "valid": False,
+                "expires_at": token_info["expires_at"],
+                "time_left": "Expiré"
+            }
+        
+        # Formatter le temps restant
+        days = token_info["days_remaining"]
+        hours = token_info["hours_remaining"]  
+        minutes = token_info["minutes_remaining"]
+        
+        if days > 0:
+            time_left = f"{days} jour{'s' if days > 1 else ''}"
+            if hours > 0:
+                time_left += f" {hours}h"
+        elif hours > 0:
+            time_left = f"{hours}h"
+            if minutes > 0:
+                time_left += f" {minutes}min"
+        else:
+            time_left = f"{minutes} minute{'s' if minutes > 1 else ''}"
+        
+        return {
+            "valid": True,
+            "expires_at": token_info["expires_at"],
+            "time_left": time_left
+        }
+    
+    def format_detailed_summary(self, details: Dict) -> str:
+        """
+        Formate un résumé détaillé d'un test pour Discord
+        
+        Args:
+            details: Détails complets du test
+            
+        Returns:
+            Texte formaté pour Discord
+        """
+        if not details:
+            return "Aucun détail disponible"
+        
+        # Extraire les informations de base
+        project = details.get("project", {})
+        results = details.get("results", {})
+        
+        project_name = project.get("name", "Projet inconnu")
+        module_code = project.get("module", {}).get("code", "Module inconnu")
+        
+        # Date du test
+        date_str = details.get("date", "")
+        formatted_date = "Date inconnue"
+        if date_str:
+            try:
+                test_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                formatted_date = test_date.strftime("%d/%m/%Y à %H:%M")
+            except:
+                pass
+        
+        # Statistiques générales
+        skills = results.get("skills", {})
+        prerequisites = results.get("prerequisites", 0)
+        mandatory_failed = results.get("mandatoryFailed", 0)
+        
+        # Calculer les totaux
+        total_tasks = len(skills)
+        passed_tasks = sum(1 for skill in skills.values() if skill.get("passed", 0) > 0)
+        total_tests = sum(skill.get("count", 0) for skill in skills.values())
+        passed_tests = sum(skill.get("passed", 0) for skill in skills.values())
+        crashed_tests = sum(skill.get("crashed", 0) for skill in skills.values())
+        
+        # Score global
+        global_score = (passed_tests / total_tests * 100) if total_tests > 0 else 0
+        
+        # Construire le résumé
+        summary_lines = [
+            f"📋 **{project_name}**",
+            f"📚 Module: `{module_code}`",
+            f"📅 Testé le: {formatted_date}",
+            "",
+            f"📊 **Résultats globaux:**",
+            f"• Score: **{passed_tests}/{total_tests}** ({global_score:.1f}%)",
+            f"• Tâches réussies: **{passed_tasks}/{total_tasks}**",
+            f"• Tests crashés: **{crashed_tests}**",
+            f"• Prérequis: **{prerequisites}**",
+        ]
+        
+        if mandatory_failed > 0:
+            summary_lines.append(f"❌ Échecs obligatoires: **{mandatory_failed}**")
+        
+        # Détails par tâche (limité pour éviter la saturation)
+        if skills:
+            summary_lines.append("")
+            summary_lines.append("📝 **Détail des tâches:**")
+            
+            for task_name, task_data in list(skills.items())[:10]:  # Max 10 tâches
+                task_passed = task_data.get("passed", 0)
+                task_count = task_data.get("count", 0)
+                task_crashed = task_data.get("crashed", 0)
+                task_mandatory_failed = task_data.get("mandatoryFailed", 0)
+                
+                # Icône selon le résultat
+                if task_passed == task_count and task_count > 0:
+                    icon = "✅"
+                elif task_crashed > 0:
+                    icon = "💥"
+                elif task_mandatory_failed > 0:
+                    icon = "🚫"
+                elif task_passed > 0:
+                    icon = "⚠️"
+                else:
+                    icon = "❌"
+                
+                task_line = f"{icon} **{task_name}**: {task_passed}/{task_count}"
+                if task_crashed > 0:
+                    task_line += f" (💥{task_crashed})"
+                
+                summary_lines.append(task_line)
+            
+            if len(skills) > 10:
+                summary_lines.append(f"... et {len(skills) - 10} autres tâches")
+        
+        # Informations lint si disponibles
+        external_items = results.get("externalItems", [])
+        if external_items:
+            lint_info = {}
+            for item in external_items:
+                item_type = item.get("type", "")
+                if item_type.startswith("lint."):
+                    lint_level = item_type.replace("lint.", "")
+                    lint_info[lint_level] = item.get("value", 0)
+            
+            if lint_info:
+                summary_lines.append("")
+                summary_lines.append("🔍 **Analyse de code:**")
+                for level, count in lint_info.items():
+                    if count > 0:
+                        emoji = {"fatal": "🔴", "major": "🟠", "minor": "🟡", "info": "🔵", "note": "⚪"}.get(level, "⚫")
+                        summary_lines.append(f"{emoji} {level.capitalize()}: {count}")
+        
+        return "\n".join(summary_lines)
