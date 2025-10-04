@@ -69,8 +69,9 @@ Bot Discord pour consulter et surveiller automatiquement les résultats de la mo
 - 📊 Consultation des derniers résultats de moulinette
 - 🔍 Affichage des détails complets d'un test spécifique
 - 🚨 Surveillance automatique des nouveaux résultats (toutes les 5 minutes)
-- � **Stockage intelligent en JSON** - évite les doublons et compare avec l'historique
-- �📈 Statistiques détaillées (taux de réussite, tâches échouées, etc.)
+- 🔔 **Notifications @everyone** - mention automatique de tous les membres
+- 📁 **Stockage intelligent en JSON** - évite les doublons et compare avec l'historique
+- 📈 Statistiques détaillées (taux de réussite, tâches échouées, etc.)
 - 🎨 Interface Discord avec embeds colorés
 - 🕒 Gestion correcte des timezones (UTC)
 - 🔧 Commandes de debug et de statut
@@ -98,6 +99,15 @@ pip install -r requirements.txt && python bot.py
 - **EPITECH_API_TOKEN** : Token Bearer de [api.epitest.eu](https://api.epitest.eu) ou auto-récupéré via `!refresh_token`
 - **CHANNEL_ID** : ID du canal Discord (mode développeur → clic droit → copier ID)
 
+### 🔐 Permissions Discord requises
+
+Pour que les mentions `@everyone` fonctionnent, le bot doit avoir :
+- ✅ **"Mention @everyone, @here, and All Roles"**
+- ✅ **"Send Messages"**
+- ✅ **"Embed Links"**
+
+*Configuration : Serveur Discord → Paramètres → Rôles → @MouliCord → Permissions*
+
 ### 🤖 Récupération automatique de token
 
 Utilisez `!refresh_token` pour récupérer automatiquement un nouveau token via Selenium :
@@ -115,6 +125,7 @@ Utilisez `!refresh_token` pour récupérer automatiquement un nouveau token via 
 |----------|-------------|
 | `!mouli [nb]` | Derniers résultats avec barres de progression |
 | `!details <id>` | Détails complets d'un test |
+| `!history <module/projet>` | 📊 **Historique complet d'un projet** (ex: G-CPE-100/cpoolday09) |
 | `!watch` | Active/désactive surveillance |
 | `!status` | Statut de la surveillance |
 | `!stats` | Statistiques du stockage |
@@ -122,6 +133,25 @@ Utilisez `!refresh_token` pour récupérer automatiquement un nouveau token via 
 | `!token` | Vérifier l'expiration du token Epitech |
 | `!refresh_token [headless]` | 🤖 Récupérer automatiquement un nouveau token (persistance permanente) |
 | `!help_mouli` | Aide complète |
+
+### 📊 Nouvelle commande `!history` 
+
+**Affiche l'historique complet d'un projet spécifique :**
+
+```bash
+!history G-CPE-100/cpoolday09    # Historique cpoolday09
+!history G-CPE-100/cpoolday08    # Historique cpoolday08  
+!history B-CPE-100/organized     # Historique organized
+```
+
+**Fonctionnalités :**
+- 📈 **Évolution du score** - Compare premier vs dernier passage
+- 📅 **Chronologie** - Affichage du plus récent au plus ancien  
+- 📊 **Barres de progression** - Pour chaque passage
+- 🕒 **Temps écoulé** - Depuis le dernier passage
+- 🆔 **ID des tests** - Pour utiliser `!details <id>`
+- 📝 **Limite intelligente** - 10 derniers passages pour éviter la saturation Discord
+- 🎯 **Format complet** - Nom du projet, module, statistiques détaillées
 
 ### 📊 Barres de progression
 - **🟩 Vert** : 90-100% (Excellent)

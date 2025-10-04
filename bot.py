@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 import os
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
+from typing import Optional
 from epitech_api import EpitechAPI
 from token_refresher import auto_refresh_token
 
@@ -24,17 +25,18 @@ class MouliCordBot:
     
     def __init__(self):
         print("🕒 Surveillance initialisée avec stockage JSON")
-    
+    auto_refresh_token(headless=True, update_env=True)
     async def send_to_channel(self, message: str, embed: discord.Embed = None):
         """Envoie un message dans le canal configuré"""
         channel = bot.get_channel(channel_id)
-        if channel:
+        if channel and hasattr(channel, 'send'):
             if embed:
-                await channel.send(message, embed=embed)
+                # Permettre les mentions @everyone
+                await channel.send(message, embed=embed, allowed_mentions=discord.AllowedMentions(everyone=True))
             else:
-                await channel.send(message)
+                await channel.send(message, allowed_mentions=discord.AllowedMentions(everyone=True))
         else:
-            print(f"Canal {channel_id} non trouvé")
+            print(f"Canal {channel_id} non trouvé ou non compatible")
 
 
 moulibot = MouliCordBot()
@@ -599,13 +601,186 @@ async def check_new_results():
                 
                 embed.set_footer(text="MouliCord Bot - Surveillance automatique avec stockage JSON")
                 
-                await moulibot.send_to_channel("", embed)
-                print(f"📢 Nouveau résultat notifié: {project_name} ({result_date})")
+                # Ajouter mention @everyone pour notifier tout le monde
+                mention_message = "@everyone"
+                await moulibot.send_to_channel(mention_message, embed)
+                print(f"📢 Nouveau résultat notifié avec @everyone: {project_name} ({result_date})")
         else:
             print("📭 Aucun nouveau résultat détecté")
                 
     except Exception as e:
-        print(f"❌ Erreur lors de la vérification automatique: {e}")
+        auto_refresh_token(headless=False, update_env=True)
+        print(f"🔄 Refresh du token en cours !")
+        import traceback
+        traceback.print_exc()
+
+
+@bot.command(name='history')
+async def history_command(ctx, *, project_id: Optional[str] = None):
+    """
+    Affiche l'historique complet d'un projet spécifique
+    Usage: !history G-CPE-100/cpoolday09
+    """
+    if not project_id:
+        embed = discord.Embed(
+            title="❌ Erreur",
+            description="Veuillez spécifier un projet au format `module/projet`\n\n**Exemple:**\n`!history G-CPE-100/cpoolday09`",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+        return
+    
+    # Message de chargement
+    loading_embed = discord.Embed(
+        title="🔍 Récupération de l'historique...",
+        description=f"Recherche des résultats pour **{project_id}**",
+        color=discord.Color.orange()
+    )
+    message = await ctx.send(embed=loading_embed)
+    
+    try:
+        # Récupérer l'historique du projet
+        history = epitech_api.get_project_history(project_id, 2025)
+        
+        if not history:
+            error_embed = discord.Embed(
+                title="❌ Aucun résultat",
+                description=f"Aucun historique trouvé pour **{project_id}**\n\nVérifiez l'orthographe ou essayez un autre projet.",
+                color=discord.Color.red()
+            )
+            await message.edit(embed=error_embed)
+            return
+        
+        # Informations du projet (du premier résultat)
+        project_info = history[0].get("project", {})
+        project_name = project_info.get("name", "Projet inconnu")
+        module_code = project_info.get("module", {}).get("code", "Module inconnu")
+        
+        # Embed principal avec résumé
+        embed = discord.Embed(
+            title=f"📊 Historique - {project_name}",
+            description=f"**Module:** {module_code}\n**Total des passages:** {len(history)}",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        # Analyser l'évolution
+        if len(history) >= 2:
+            latest = history[0]
+            oldest = history[-1]
+            
+            latest_skills = latest.get("results", {}).get("skills", {})
+            oldest_skills = oldest.get("results", {}).get("skills", {})
+            
+            latest_passed = sum(skill.get("passed", 0) for skill in latest_skills.values())
+            latest_total = sum(skill.get("count", 0) for skill in latest_skills.values())
+            
+            oldest_passed = sum(skill.get("passed", 0) for skill in oldest_skills.values())
+            oldest_total = sum(skill.get("count", 0) for skill in oldest_skills.values())
+            
+            if latest_total > 0 and oldest_total > 0:
+                latest_percent = (latest_passed / latest_total) * 100
+                oldest_percent = (oldest_passed / oldest_total) * 100
+                evolution = latest_percent - oldest_percent
+                
+                evolution_icon = "📈" if evolution > 0 else "📉" if evolution < 0 else "➡️"
+                embed.add_field(
+                    name="📊 Évolution",
+                    value=f"{evolution_icon} {evolution:+.1f}% ({oldest_percent:.1f}% → {latest_percent:.1f}%)",
+                    inline=True
+                )
+        
+        # Détails des passages (limités aux 10 derniers pour éviter la saturation)
+        history_display = history[:10]  # Limiter à 10 pour éviter de dépasser la limite Discord
+        
+        history_text = ""
+        for i, entry in enumerate(history_display):
+            date_str = entry.get("date", "")
+            test_run_id = entry.get("results", {}).get("testRunId", "N/A")
+            
+            # Parser la date
+            try:
+                entry_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                date_formatted = entry_date.strftime("%d/%m/%Y %H:%M")
+            except:
+                date_formatted = "Date inconnue"
+            
+            # Calculer le score
+            skills = entry.get("results", {}).get("skills", {})
+            passed = sum(skill.get("passed", 0) for skill in skills.values())
+            total = sum(skill.get("count", 0) for skill in skills.values())
+            
+            if total > 0:
+                score_percent = (passed / total) * 100
+                progress_bar = epitech_api._generate_progress_bar(passed, total, 10)
+                
+                # Icône selon le score
+                if score_percent == 100:
+                    icon = "🏆"
+                elif score_percent >= 80:
+                    icon = "✅"
+                elif score_percent >= 50:
+                    icon = "⚠️"
+                else:
+                    icon = "❌"
+                
+                history_text += f"{icon} **{date_formatted}** - {passed}/{total} ({score_percent:.1f}%)\n"
+                history_text += f"   {progress_bar} `ID: {test_run_id}`\n\n"
+            else:
+                history_text += f"⭕ **{date_formatted}** - Aucun test\n   `ID: {test_run_id}`\n\n"
+        
+        # Ajouter l'historique à l'embed
+        embed.add_field(
+            name=f"📝 Historique (10 derniers sur {len(history)})",
+            value=history_text[:1024] if history_text else "Aucun détail disponible",
+            inline=False
+        )
+        
+        # Informations sur le dernier passage
+        if history:
+            latest_entry = history[0]
+            latest_date = latest_entry.get("date", "")
+            try:
+                latest_dt = datetime.fromisoformat(latest_date.replace('Z', '+00:00'))
+                time_ago = datetime.now(timezone.utc) - latest_dt
+                
+                if time_ago.days > 0:
+                    time_str = f"il y a {time_ago.days} jour{'s' if time_ago.days > 1 else ''}"
+                else:
+                    hours = time_ago.seconds // 3600
+                    minutes = (time_ago.seconds % 3600) // 60
+                    if hours > 0:
+                        time_str = f"il y a {hours}h{minutes:02d}m"
+                    else:
+                        time_str = f"il y a {minutes} minute{'s' if minutes > 1 else ''}"
+                
+                embed.add_field(
+                    name="⏰ Dernier passage",
+                    value=time_str,
+                    inline=True
+                )
+            except:
+                pass
+        
+        # Note pour voir plus de détails
+        if len(history) > 10:
+            embed.add_field(
+                name="ℹ️ Info",
+                value=f"Seuls les 10 derniers passages sont affichés.\nUtilisez `!details <ID>` pour voir un passage spécifique.",
+                inline=False
+            )
+        
+        embed.set_footer(text="MouliCord Bot - Historique projet")
+        await message.edit(embed=embed)
+        
+    except Exception as e:
+        error_embed = discord.Embed(
+            title="❌ Erreur",
+            description=f"Erreur lors de la récupération de l'historique:\n```{str(e)}```",
+            color=discord.Color.red()
+        )
+        await message.edit(embed=error_embed)
+        print(f"Erreur dans history_command: {e}")
         import traceback
         traceback.print_exc()
 
@@ -676,6 +851,12 @@ async def help_command(ctx):
     embed.add_field(
         name="!refresh_token [headless]",
         value="Récupère automatiquement un nouveau token via Selenium (avec persistance Office)",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="!history <module/projet>",
+        value="Affiche l'historique complet d'un projet (ex: G-CPE-100/cpoolday09)",
         inline=False
     )
     

@@ -58,6 +58,32 @@ class EpitechAPI:
             print(f"Erreur lors de la récupération des détails du test {run_id}: {e}")
             return None
     
+    def get_project_history(self, project_id: str, year: int = 2025) -> List[Dict]:
+        """
+        Récupère l'historique complet d'un projet spécifique
+        
+        Args:
+            project_id: ID du projet au format "module/project" (ex: "G-CPE-100/cpoolday09")
+            year: Année des résultats (défaut: 2025)
+            
+        Returns:
+            Liste de tous les résultats pour ce projet, triés par date
+        """
+        try:
+            url = f"{self.base_url}/me/{year}/{project_id}"
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            history = response.json()
+            
+            # Trier par date (plus récent en premier)
+            if isinstance(history, list):
+                history.sort(key=lambda x: x.get("date", ""), reverse=True)
+            
+            return history if isinstance(history, list) else [history]
+        except requests.exceptions.RequestException as e:
+            print(f"Erreur lors de la récupération de l'historique du projet {project_id}: {e}")
+            return []
+    
     def _generate_progress_bar(self, passed: int, total: int, length: int = 20) -> str:
         """
         Génère une barre de progression visuelle
