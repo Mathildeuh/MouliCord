@@ -76,10 +76,17 @@ class MouliCordBot:
             project_slug = result.get("project", {}).get("slug", "")
             date = result.get("date", "")
             
-            # Informations du test
-            test_results = result.get("results", {})
-            passed = test_results.get("passed", 0)
-            total = test_results.get("total", 0)
+            # Calculer les vrais scores depuis la structure skills
+            skills = result.get("results", {}).get("skills", {})
+            passed = 0
+            total = 0
+            
+            for skill_name, skill_data in skills.items():
+                skill_passed = skill_data.get("passed", 0)
+                skill_count = skill_data.get("count", 0)
+                passed += skill_passed
+                total += skill_count
+            
             percentage = round((passed / total * 100) if total > 0 else 0, 1)
             
             # Déterminer la couleur et l'emoji selon le score
@@ -110,7 +117,7 @@ class MouliCordBot:
             
             embed.add_field(
                 name="📊 Résultats",
-                value=f"• Tests passés: **{passed}/{total}**\\n• Pourcentage: **{percentage}%**",
+                value=f"• Tests passés: **{passed}/{total}** \n• Pourcentage: **{percentage}%**",
                 inline=True
             )
             
@@ -150,12 +157,15 @@ async def on_ready():
     print(f'{bot.user} est connecté à Discord!')
     print(f'Canal configuré: {channel_id}')
     
-    # Actualiser le token au démarrage
-    print("🔄 Actualisation du token au démarrage...")
-    try:
-        auto_refresh_token(headless=True, update_env=True)
-    except Exception as e:
-        print(f"⚠️ Erreur lors de l'actualisation du token: {e}")
+    # Actualiser le token au démarrage (optionnel si SKIP_TOKEN_REFRESH=true)
+    if not os.getenv('SKIP_TOKEN_REFRESH', '').lower() == 'true':
+        print("🔄 Actualisation du token au démarrage...")
+        try:
+            auto_refresh_token(headless=True, update_env=True)
+        except Exception as e:
+            print(f"⚠️ Erreur lors de l'actualisation du token: {e}")
+    else:
+        print("⏭️ Actualisation du token ignorée (SKIP_TOKEN_REFRESH=true)")
     
     # Charger les Slash Commands
     try:
@@ -250,6 +260,50 @@ async def info_command(ctx):
     embed.set_footer(text="Utilisez /help pour le guide complet • MouliCord v2.0")
     
     await ctx.send(embed=embed)
+
+
+@bot.hybrid_command(name="test_notification", description="🧪 Tester une notification de moulinette")
+async def test_notification_command(ctx):
+    """Commande pour tester les notifications de moulinette"""
+    try:
+        # Récupérer le premier résultat pour test
+        results = epitech_api.get_moulinette_results(2025)
+        
+        if results:
+            # Simuler une nouvelle moulinette avec le premier résultat
+            test_result = results[0]
+            
+            await ctx.send("🧪 **Test de notification en cours...**")
+            await moulibot.send_moulinette_notification(test_result)
+            
+            await ctx.send("✅ **Notification de test envoyée !**\nVérifiez le canal configuré.")
+        else:
+            await ctx.send("❌ **Aucun résultat disponible pour le test.**")
+            
+    except Exception as e:
+        await ctx.send(f"❌ **Erreur lors du test:** {e}")
+
+
+@bot.hybrid_command(name="force_check", description="🔍 Forcer une vérification des nouvelles moulinettes")
+async def force_check_command(ctx):
+    """Commande pour forcer une vérification manuelle"""
+    try:
+        await ctx.send("🔍 **Vérification manuelle en cours...**")
+        
+        new_results = epitech_api.get_new_results(2025)
+        
+        if new_results:
+            await ctx.send(f"🆕 **{len(new_results)} nouveaux résultats détectés !**")
+            
+            for result in new_results:
+                await moulibot.send_moulinette_notification(result)
+                
+            await ctx.send(f"✅ **{len(new_results)} notifications envoyées !**")
+        else:
+            await ctx.send("📊 **Aucun nouveau résultat détecté.**\nTous les résultats sont déjà connus.")
+            
+    except Exception as e:
+        await ctx.send(f"❌ **Erreur lors de la vérification:** {e}")
 
 
 if __name__ == "__main__":
