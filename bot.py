@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from epitech_api import EpitechAPI
@@ -9,11 +10,131 @@ from token_refresher import auto_refresh_token
 # Charger les variables d'environnement
 load_dotenv()
 
+# Variables globales pour la gestion des tokens
+current_token = None
+epitech_api = None
+
+def get_fresh_token():
+    """Récupère un nouveau token depuis Epitech avec retry logic"""
+    global current_token, epitech_api
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            print(f"🔄 Récupération d'un nouveau token (tentative {attempt + 1}/{max_retries})...")
+            result = auto_refresh_token(headless=True, update_env=False)
+            
+            if result.get("success") and result.get("token"):
+                new_token = result["token"]
+                
+                # Valider le format du token avant de l'utiliser
+                if not new_token or not isinstance(new_token, str):
+                    print("❌ Token récupéré invalide (vide ou mauvais type)")
+                    if attempt < max_retries - 1:
+                        print("🔄 Nouvelle tentative dans 5s...")
+                        time.sleep(5)
+                        continue
+                    return False
+                
+                # Nettoyer le token (retirer "Bearer " si présent)
+                clean_token = new_token.strip()
+                if clean_token.startswith("Bearer "):
+                    clean_token = clean_token[7:].strip()
+                
+                # Vérifier que c'est un JWT valide (3 parties séparées par des points)
+                parts = clean_token.split('.')
+                if len(parts) != 3:
+                    print(f"❌ Token JWT invalide: {len(parts)} parties au lieu de 3")
+                    print(f"🔍 Token reçu (premiers 100 chars): {new_token[:100]}...")
+                    if attempt < max_retries - 1:
+                        print("🔄 Nouvelle tentative dans 10s...")
+                        time.sleep(10)
+                        continue
+                    return False
+                
+                # Tester la création de l'API avec le nouveau token
+                try:
+                    test_api = EpitechAPI(clean_token, "results_history.json")
+                    token_info = test_api.get_token_info()
+                    
+                    if "error" in token_info:
+                        print(f"❌ Token invalide: {token_info['error']}")
+                        if attempt < max_retries - 1:
+                            print("� Nouvelle tentative dans 10s...")
+                            time.sleep(10)
+                            continue
+                        return False
+                    
+                    if token_info.get("is_expired", True):
+                        print("❌ Token récupéré est déjà expiré")
+                        if attempt < max_retries - 1:
+                            print("🔄 Nouvelle tentative dans 5s...")
+                            time.sleep(5)
+                            continue
+                        return False
+                    
+                    # Token valide, l'utiliser
+                    current_token = clean_token
+                    epitech_api = test_api
+                    
+                    print("✅ Nouveau token récupéré et validé (expire dans ~1h)")
+                    return True
+                    
+                except Exception as e:
+                    print(f"❌ Erreur lors de la validation du token: {e}")
+                    if attempt < max_retries - 1:
+                        print("🔄 Nouvelle tentative dans 10s...")
+                        time.sleep(10)
+                        continue
+                    return False
+                
+            else:
+                print(f"❌ Échec de récupération du token: {result.get('error', 'Erreur inconnue')}")
+                if attempt < max_retries - 1:
+                    print("🔄 Nouvelle tentative dans 15s...")
+                    time.sleep(15)
+                    continue
+                return False
+                
+        except Exception as e:
+            print(f"❌ Erreur lors de la récupération du token (tentative {attempt + 1}): {e}")
+            if attempt < max_retries - 1:
+                print("🔄 Nouvelle tentative dans 15s...")
+                time.sleep(15)
+                continue
+            return False
+    
+    print("❌ Échec définitif après 3 tentatives")
+    return False
+
+def ensure_valid_token():
+    """S'assure que le token est valide, le renouvelle si nécessaire"""
+    global current_token, epitech_api
+    
+    # Si pas de token du tout, en récupérer un
+    if not current_token or not epitech_api:
+        return get_fresh_token()
+    
+    try:
+        # Vérifier si le token actuel est encore valide
+        token_info = epitech_api.get_token_info()
+        
+        if token_info.get("is_expired", True):
+            print("⏰ Token expiré (durée de vie: 1h), renouvellement automatique...")
+            return get_fresh_token()
+        
+        # Token valide
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ Erreur lors de la vérification du token: {e}")
+        print("🔄 Tentative de récupération d'un nouveau token...")
+        return get_fresh_token()
+
 def validate_environment():
     """Valide que toutes les variables d'environnement nécessaires sont présentes"""
     required_vars = {
         'DISCORD_BOT_TOKEN': 'Token du bot Discord',
-        'EPITECH_API_TOKEN': 'Token Bearer de l\'API Epitech', 
         'CHANNEL_ID': 'ID du canal Discord'
     }
     
@@ -29,8 +150,8 @@ def validate_environment():
             print(f"   • {var}")
         print("\n💡 Créez un fichier .env avec:")
         print("   DISCORD_BOT_TOKEN=your_bot_token")
-        print("   EPITECH_API_TOKEN=your_bearer_token")  
         print("   CHANNEL_ID=your_channel_id")
+        print("\n🔑 Le token Epitech sera récupéré automatiquement (expire toutes les heures)")
         print("\n📁 Exemple disponible dans .env.example")
         return False
     return True
@@ -44,13 +165,12 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-# Initialisation sécurisée avec les variables validées
-epitech_api = EpitechAPI(os.getenv('EPITECH_API_TOKEN', ''), "results_history.json")
+# Variables globales - l'API sera initialisée après récupération du token
 channel_id = int(os.getenv('CHANNEL_ID', '0'))
 
 
 class MouliCordBot:
-    """Bot Discord pour les résultats de la moulinette Epitech - Version Slash Commands uniquement"""
+    """Bot Discord pour les résultats de la moulinette Epitech - Tokens auto-renouvelés toutes les heures"""
     
     def __init__(self):
         print("🚀 MouliCord v2.0 - Full Slash Commands Edition")
@@ -157,15 +277,14 @@ async def on_ready():
     print(f'{bot.user} est connecté à Discord!')
     print(f'Canal configuré: {channel_id}')
     
-    # Actualiser le token au démarrage (optionnel si SKIP_TOKEN_REFRESH=true)
-    if not os.getenv('SKIP_TOKEN_REFRESH', '').lower() == 'true':
-        print("🔄 Actualisation du token au démarrage...")
-        try:
-            auto_refresh_token(headless=True, update_env=True)
-        except Exception as e:
-            print(f"⚠️ Erreur lors de l'actualisation du token: {e}")
+    # Récupération automatique du token au démarrage
+    print("🔄 Initialisation du token Epitech...")
+    if not ensure_valid_token():
+        print("❌ Impossible de récupérer le token Epitech")
+        print("⚠️ Le bot continuera sans les fonctionnalités Epitech")
+        return
     else:
-        print("⏭️ Actualisation du token ignorée (SKIP_TOKEN_REFRESH=true)")
+        print("✅ Token Epitech configuré avec succès")
     
     # Charger les Slash Commands
     try:
@@ -184,7 +303,16 @@ async def on_ready():
     # Vérification immédiate au démarrage pour les nouveaux résultats
     try:
         print("🔍 Vérification des nouveaux résultats au démarrage...")
-        new_results_at_startup = epitech_api.get_new_results(2025)
+        
+        if not ensure_valid_token():
+            print("⚠️ Token indisponible, pas de vérification au démarrage")
+            return
+        
+        if epitech_api:
+            new_results_at_startup = epitech_api.get_new_results(2025)
+        else:
+            new_results_at_startup = []
+            print("⚠️ API non initialisée au démarrage")
         
         if new_results_at_startup:
             print(f"🆕 {len(new_results_at_startup)} nouveaux résultats détectés au démarrage !")
@@ -195,8 +323,9 @@ async def on_ready():
     except Exception as e:
         print(f"⚠️ Erreur lors de la vérification au démarrage: {e}")
     
-    # Démarrer la vérification automatique périodique
+    # Démarrer les tâches automatiques
     check_new_results.start()
+    check_token_expiration.start()
 
 
 @tasks.loop(minutes=5)
@@ -205,8 +334,17 @@ async def check_new_results():
     try:
         print(f"🔍 Vérification automatique - {datetime.now().strftime('%H:%M:%S')}")
         
+        # S'assurer que le token est valide avant de vérifier
+        if not ensure_valid_token():
+            print("⚠️ Token indisponible, vérification ignorée")
+            return
+        
         # Vérifier les nouveaux résultats
-        new_results = epitech_api.get_new_results(2025)
+        if epitech_api:
+            new_results = epitech_api.get_new_results(2025)
+        else:
+            print("⚠️ API non initialisée")
+            return
         
         if new_results:
             print(f"🆕 {len(new_results)} nouveaux résultats détectés !")
@@ -225,6 +363,34 @@ async def check_new_results():
 @check_new_results.before_loop
 async def before_check_new_results():
     """Attendre que le bot soit prêt avant de commencer la vérification"""
+    await bot.wait_until_ready()
+
+
+@tasks.loop(hours=1)
+async def check_token_expiration():
+    """Vérification et renouvellement préventif du token (durée de vie: 1h)"""
+    try:
+        print(f"🔐 Vérification de l'expiration du token - {datetime.now().strftime('%H:%M:%S')}")
+        
+        if epitech_api and current_token:
+            token_info = epitech_api.get_token_info()
+            
+            if token_info.get("is_expired", False):
+                print("⏰ Token expiré détecté (durée de vie: 1h), renouvellement automatique...")
+                ensure_valid_token()
+            else:
+                print("✅ Token valide (expire dans ~1h depuis sa création)")
+        else:
+            print("⚠️ Aucun token configuré, tentative de récupération...")
+            ensure_valid_token()
+            
+    except Exception as e:
+        print(f"❌ Erreur lors de la vérification du token: {e}")
+
+
+@check_token_expiration.before_loop
+async def before_check_token_expiration():
+    """Attendre que le bot soit prêt avant de commencer la vérification des tokens"""
     await bot.wait_until_ready()
 
 
@@ -266,8 +432,17 @@ async def info_command(ctx):
 async def test_notification_command(ctx):
     """Commande pour tester les notifications de moulinette"""
     try:
+        # S'assurer que le token est valide
+        if not ensure_valid_token():
+            await ctx.send("❌ **Erreur:** Token Epitech indisponible")
+            return
+        
         # Récupérer le premier résultat pour test
-        results = epitech_api.get_moulinette_results(2025)
+        if epitech_api:
+            results = epitech_api.get_moulinette_results(2025)
+        else:
+            await ctx.send("❌ **Erreur:** API non initialisée")
+            return
         
         if results:
             # Simuler une nouvelle moulinette avec le premier résultat
@@ -290,8 +465,17 @@ async def force_check_command(ctx):
     try:
         await ctx.send("🔍 **Vérification manuelle en cours...**")
         
-        new_results = epitech_api.get_new_results(2025)
-        
+        # S'assurer que le token est valide
+        if not ensure_valid_token():
+            await ctx.send("❌ **Erreur:** Token Epitech indisponible")
+            return
+
+        if epitech_api:
+            new_results = epitech_api.get_new_results(2025)
+        else:
+            await ctx.send("❌ **Erreur:** API non initialisée")
+            return
+            
         if new_results:
             await ctx.send(f"🆕 **{len(new_results)} nouveaux résultats détectés !**")
             

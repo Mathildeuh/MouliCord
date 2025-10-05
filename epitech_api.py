@@ -366,22 +366,35 @@ class EpitechAPI:
             if not self.bearer_token:
                 return {"error": "Aucun token configuré"}
             
-            # Le token est déjà un JWT, pas besoin de séparer "Bearer"
-            jwt_token = self.bearer_token
+            # Nettoyer le token (supprimer "Bearer " s'il est présent)
+            jwt_token = self.bearer_token.strip()
+            if jwt_token.startswith("Bearer "):
+                jwt_token = jwt_token[7:].strip()
+            
+            # Vérifier que ce n'est pas vide après nettoyage
+            if not jwt_token:
+                return {"error": "Token vide après nettoyage"}
             
             # Décoder le JWT (sans vérification de signature)
             # Un JWT a 3 parties séparées par des points
             parts = jwt_token.split('.')
             if len(parts) != 3:
-                return {"error": "Token JWT invalide"}
+                return {"error": f"Token JWT invalide: {len(parts)} parties au lieu de 3"}
+            
+            # Vérifier que chaque partie n'est pas vide
+            if not all(parts):
+                return {"error": "Token JWT invalide: parties vides détectées"}
             
             # Décoder le payload (partie 2)
             # Ajouter le padding nécessaire pour base64
             payload = parts[1]
             payload += '=' * (4 - len(payload) % 4)
             
-            decoded_bytes = base64.urlsafe_b64decode(payload)
-            payload_data = json.loads(decoded_bytes.decode('utf-8'))
+            try:
+                decoded_bytes = base64.urlsafe_b64decode(payload)
+                payload_data = json.loads(decoded_bytes.decode('utf-8'))
+            except Exception as decode_error:
+                return {"error": f"Erreur de décodage JWT: {decode_error}"}
             
             # Extraire les informations d'expiration
             exp_timestamp = payload_data.get('exp')
@@ -426,29 +439,22 @@ class EpitechAPI:
         except Exception as e:
             return {"error": f"Erreur lors de l'analyse du token: {str(e)}"}
     
-    def check_token_expiration(self) -> Dict:
+    def check_token_expiration(self) -> str:
         """
-        Vérifie l'expiration du token et retourne des informations formatées
+        Vérifie l'expiration du token et retourne des informations formatées pour Discord
         
         Returns:
-            Dict avec les informations d'expiration formatées pour Discord
+            String formatée avec les informations d'expiration
         """
         token_info = self.get_token_info()
         
         if "error" in token_info:
-            return {
-                "valid": False,
-                "error": token_info["error"]
-            }
+            return f"❌ **Token invalide**\n```{token_info['error']}```"
         
         is_expired = token_info["is_expired"]
         
         if is_expired:
-            return {
-                "valid": False,
-                "expires_at": token_info["expires_at"],
-                "time_left": "Expiré"
-            }
+            return f"❌ **Token expiré**\nExpiration: {token_info['expires_at']}"
         
         # Formatter le temps restant
         days = token_info["days_remaining"]
@@ -466,11 +472,15 @@ class EpitechAPI:
         else:
             time_left = f"{minutes} minute{'s' if minutes > 1 else ''}"
         
-        return {
-            "valid": True,
-            "expires_at": token_info["expires_at"],
-            "time_left": time_left
-        }
+        # Ajouter des informations supplémentaires
+        result = f"✅ **Token valide**\n"
+        result += f"⏰ Temps restant: **{time_left}**\n"
+        result += f"📅 Expire le: {token_info['expires_at']}"
+        
+        if "issued_at" in token_info:
+            result += f"\n🕐 Émis le: {token_info['issued_at']}"
+        
+        return result
     
     def format_detailed_summary(self, details: Dict) -> str:
         """
