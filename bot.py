@@ -107,12 +107,50 @@ def get_fresh_token():
     print("❌ Échec définitif après 3 tentatives")
     return False
 
+def init_token_from_env():
+    """Initialise le token depuis les variables d'environnement si disponible"""
+    global current_token, epitech_api
+    
+    env_token = os.getenv('EPITECH_API_TOKEN')
+    if env_token and env_token.strip():
+        print(f"🔑 Token trouvé dans .env: {env_token[:20]}...")
+        
+        # Nettoyer le token
+        clean_token = env_token.strip()
+        if clean_token.startswith("Bearer "):
+            clean_token = clean_token[7:].strip()
+        
+        # Vérifier que c'est un JWT valide
+        parts = clean_token.split('.')
+        if len(parts) == 3:
+            try:
+                # Tester le token
+                test_api = EpitechAPI(clean_token, "results_history.json")
+                token_info = test_api.get_token_info()
+                
+                if not token_info.get("is_expired", True) and "error" not in token_info:
+                    current_token = clean_token
+                    epitech_api = test_api
+                    print("✅ Token du .env validé et configuré")
+                    return True
+                else:
+                    print(f"⚠️ Token du .env expiré ou invalide: {token_info}")
+            except Exception as e:
+                print(f"⚠️ Erreur validation token .env: {e}")
+        else:
+            print(f"⚠️ Token .env invalide (format JWT): {len(parts)} parties")
+    
+    print("🔄 Token .env non disponible ou invalide, récupération automatique...")
+    return False
+
 def ensure_valid_token():
     """S'assure que le token est valide, le renouvelle si nécessaire"""
     global current_token, epitech_api
     
-    # Si pas de token du tout, en récupérer un
+    # D'abord essayer le token du .env si on n'en a pas
     if not current_token or not epitech_api:
+        if init_token_from_env():
+            return True
         return get_fresh_token()
     
     try:
@@ -278,20 +316,28 @@ async def on_ready():
     print(f'Canal configuré: {channel_id}')
     
     # Récupération automatique du token au démarrage
-    print("🔄 Initialisation du token Epitech...")
-    if not ensure_valid_token():
-        print("❌ Impossible de récupérer le token Epitech")
-        print("⚠️ Le bot continuera sans les fonctionnalités Epitech")
-        return
-    else:
-        print("✅ Token Epitech configuré avec succès")
-    
-    # Charger les Slash Commands
+    # Charger les Slash Commands d'abord
     try:
         await bot.load_extension('slash_commands')
         print('✅ Slash Commands chargés')
     except Exception as e:
         print(f'❌ Erreur lors du chargement des Slash Commands: {e}')
+    
+    print("🔄 Initialisation du token Epitech...")
+    if not ensure_valid_token():
+        print("❌ Impossible de récupérer le token Epitech")
+        print("⚠️ Le bot continuera sans les fonctionnalités Epitech")
+    else:
+        print("✅ Token Epitech configuré avec succès")
+        
+        # Mettre à jour l'API dans le Cog des slash commands
+        try:
+            slash_commands_cog = bot.get_cog('MouliCordSlashCommands')
+            if slash_commands_cog and hasattr(slash_commands_cog, 'update_epitech_api'):
+                slash_commands_cog.update_epitech_api(epitech_api)
+                print("🔄 API mise à jour dans les slash commands")
+        except Exception as e:
+            print(f"⚠️ Impossible de mettre à jour l'API dans les commands: {e}")
     
     # Synchroniser les commandes avec Discord
     try:
