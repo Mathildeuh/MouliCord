@@ -232,7 +232,14 @@ class MouliCordBot:
             # Extraire les informations du résultat
             project_name = result.get("project", {}).get("name", "Projet inconnu")
             project_slug = result.get("project", {}).get("slug", "")
+            module_code = result.get("project", {}).get("module", {}).get("code", "G-CPE-100")
+            test_run_id = result.get("results", {}).get("testRunId", "")
             date = result.get("date", "")
+            
+            # Construire l'URL vers le projet sur myresults.epitest.eu
+            project_url = None
+            if project_slug and test_run_id:
+                project_url = f"https://myresults.epitest.eu/index.html#d/2025/{module_code}/{project_slug}/{test_run_id}"
             
             # Calculer les vrais scores depuis la structure skills
             skills = result.get("results", {}).get("skills", {})
@@ -265,9 +272,12 @@ class MouliCordBot:
                 emoji = "❌"
                 status = "ÉCHEC"
             
-            # Créer l'embed de notification
+            # Créer l'embed de notification avec URL cliquable
+            title = f"{emoji} Nouvelle Moulinette - {project_name}"
+            
             embed = discord.Embed(
-                title=f"{emoji} Nouvelle Moulinette - {project_name}",
+                title=title,
+                url=project_url if project_url else None,  # Rend tout le titre cliquable
                 description=f"**{status}** • {passed}/{total} tests ({percentage}%)",
                 color=color,
                 timestamp=datetime.fromisoformat(date.replace('Z', '+00:00')) if date else datetime.now()
@@ -286,8 +296,14 @@ class MouliCordBot:
                     inline=True
                 )
             
-            # Informations supplémentaires
-            if project_slug:
+            # Informations supplémentaires avec lien vers le projet
+            if project_url:
+                embed.add_field(
+                    name="",
+                    value=f"🔗 [Voir sur EpiTest]({project_url})",
+                    inline=False
+                )
+            elif project_slug:
                 embed.add_field(
                     name="🔗 Projet",
                     value=f"`{project_slug}`",
@@ -297,7 +313,7 @@ class MouliCordBot:
             embed.set_footer(text="MouliCord v2.0 • Surveillance automatique")
             
             # Envoyer la notification avec @everyone pour les nouveaux résultats
-            message = f"@everyone 🚨 **NOUVEAU RÉSULTAT DE MOULINETTE !**"
+            message = f"@//everyone 🚨 **NOUVEAU RÉSULTAT DE MOULINETTE !**"
             
             await self.send_to_channel(message, embed)
             print(f"📨 Notification envoyée pour: {project_name} ({percentage}%)")
