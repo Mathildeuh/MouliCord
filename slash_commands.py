@@ -10,119 +10,111 @@ from token_refresher import auto_refresh_token
 import os
 
 
-class ProjectDetailsView(discord.ui.View):
-    """Vue avec menu déroulant pour sélectionner un projet et afficher ses détails"""
+# (ProjectDetailsView et ProjectSelect supprimées - utilisées uniquement pour /details)
+
+class TokenView(discord.ui.View):
+    """Vue pour la commande /token avec bouton de rafraîchissement"""
     
-    def __init__(self, results: List[dict], epitech_api):
+    def __init__(self, epitech_api):
         super().__init__(timeout=300)  # 5 minutes timeout
-        self.results = results
-        self.epitech_api = epitech_api
-        
-        # Créer les options pour le menu déroulant
-        options = []
-        for result in results[:25]:  # Discord limite à 25 options
-            project = result.get("project", {})
-            name = project.get("name", "Projet inconnu")
-            slug = project.get("slug", "unknown")
-            
-            # Calculer le taux de réussite pour l'aperçu
-            skills = result.get("results", {}).get("skills", {})
-            total_tests = sum(skill.get("count", 0) for skill in skills.values())
-            total_passed = sum(skill.get("passed", 0) for skill in skills.values())
-            rate = (total_passed / total_tests * 100) if total_tests > 0 else 0
-            
-            # Émoji selon le taux de réussite
-            emoji = "🟢" if rate >= 70 else "🟡" if rate >= 50 else "🔴"
-            
-            options.append(discord.SelectOption(
-                label=f"{name}",
-                description=f"{emoji} {rate:.1f}% - {total_passed}/{total_tests} tests",
-                value=slug,
-                emoji="🎯"
-            ))
-        
-        # Ajouter le menu déroulant
-        self.add_item(ProjectSelect(options, self.results, self.epitech_api))
-
-
-class ProjectSelect(discord.ui.Select):
-    """Menu déroulant pour sélectionner un projet"""
-    
-    def __init__(self, options: List[discord.SelectOption], results: List[dict], epitech_api):
-        super().__init__(
-            placeholder="🔍 Sélectionnez un projet...",
-            options=options,
-            min_values=1,
-            max_values=1
-        )
-        self.results = results
         self.epitech_api = epitech_api
     
-    async def callback(self, interaction: discord.Interaction):
-        """Callback when a project is selected"""
+    @discord.ui.button(label="🔄 Actualiser Token", style=discord.ButtonStyle.primary)
+    async def refresh_token_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Bouton pour actualiser le token"""
         await interaction.response.defer()
         
-        selected_slug = self.values[0]
-        
-        # Trouver le projet sélectionné
-        project_result = None
-        for result in self.results:
-            if result.get("project", {}).get("slug") == selected_slug:
-                project_result = result
-                break
-        
-        if not project_result:
+        try:
+            # Message de début
             embed = discord.Embed(
-                title="❌ Erreur",
-                description="Projet non trouvé dans les résultats",
-                color=discord.Color.red()
+                title="🔄 Renouvellement du Token",
+                description="⏳ Génération d'un nouveau token (valide 1h)...",
+                color=discord.Color.blue(),
+                timestamp=datetime.now()
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
-            return
-        
-        # Créer l'embed détaillé manuellement
-        project = project_result.get("project", {})
-        project_name = project.get("name", "Projet inconnu")
-        skills = project_result.get("results", {}).get("skills", {})
-        total_tests = sum(skill.get("count", 0) for skill in skills.values())
-        total_passed = sum(skill.get("passed", 0) for skill in skills.values())
-        rate = (total_passed / total_tests * 100) if total_tests > 0 else 0
-        progress = self.epitech_api._generate_progress_bar(total_passed, total_tests, 15)
-        
-        embed = discord.Embed(
-            title=f"🔍 Détails - {project_name}",
-            description=f"📊 **{total_passed}/{total_tests} tests** ({rate:.1f}%)\n📈 {progress}",
-            color=discord.Color.green() if rate >= 70 else discord.Color.orange() if rate >= 50 else discord.Color.red(),
-            timestamp=datetime.now()
-        )
-        
-        # Détails par compétence
-        for skill_name, skill_data in skills.items():
-            count = skill_data.get("count", 0)
-            passed = skill_data.get("passed", 0)
-            skill_rate = (passed / count * 100) if count > 0 else 0
-            skill_progress = self.epitech_api._generate_progress_bar(passed, count, 8)
             
-            embed.add_field(
-                name=f"🎯 {skill_name}",
-                value=f"{passed}/{count} ({skill_rate:.1f}%)\n{skill_progress}",
-                inline=True
+            # Lancer l'actualisation avec Selenium
+            success = auto_refresh_token(headless=True, update_env=False)
+            
+            if success:
+                # Vérifier le nouveau token et relier l'API en mémoire
+                try:
+                    import bot as bot_module
+                    if bot_module.ensure_valid_token() and getattr(bot_module, 'epitech_api', None):
+                        self.epitech_api = bot_module.epitech_api
+                except Exception:
+                    pass
+
+                # Construire un résumé avec timestamps Discord
+                token_info = self.epitech_api.get_token_info()
+                is_expired = token_info.get("is_expired", True)
+                # Temps restant (approx)
+                minutes_left = token_info.get("minutes_remaining", 0)
+                hours_left = token_info.get("hours_remaining", 0)
+                days_left = token_info.get("days_remaining", 0)
+                if days_left > 0:
+                    time_left = f"{days_left} jour{'s' if days_left > 1 else ''} {hours_left}h"
+                elif hours_left > 0:
+                    suffix = f" {minutes_left}min" if minutes_left > 0 else ""
+                    time_left = f"{hours_left}h{suffix}"
+                else:
+                    time_left = f"{minutes_left} minute{'s' if minutes_left > 1 else ''}"
+
+                exp_epoch = token_info.get("exp_epoch")
+                iat_epoch = token_info.get("iat_epoch")
+                expires_text = f"<t:{exp_epoch}:F> (<t:{exp_epoch}:R>)" if exp_epoch else token_info.get("expires_at", "Inconnu")
+                issued_text = f"<t:{iat_epoch}:F> (<t:{iat_epoch}:R>)" if iat_epoch else token_info.get("issued_at", "Inconnu")
+
+                token_summary = (
+                    "✅ **Token valide**\n" if not is_expired else "❌ **Token expiré**\n"
+                ) + (
+                    f"⏰ Temps restant: **{time_left}**\n" if not is_expired else ""
+                ) + (
+                    f"📅 Expire le: {expires_text}\n"
+                ) + (
+                    f"🕐 Émis le: {issued_text}" if token_info.get("issued_at") or iat_epoch else ""
+                )
+
+                embed = discord.Embed(
+                    title="✅ Token Actualisé",
+                    description="🎉 Le token a été actualisé avec succès !",
+                    color=discord.Color.green(),
+                    timestamp=datetime.now()
+                )
+                
+                embed.add_field(name="🔑 Nouveau Token", value=token_summary, inline=False)
+                
+                embed.add_field(
+                    name="🔧 Méthode",
+                    value="✅ Selenium + Office persistant",
+                    inline=True
+                )
+                
+            else:
+                embed = discord.Embed(
+                    title="❌ Échec de l'actualisation",
+                    description="Impossible d'actualiser le token automatiquement",
+                    color=discord.Color.red(),
+                    timestamp=datetime.now()
+                )
+                
+                embed.add_field(
+                    name="💡 Solution",
+                    value="Vérifiez votre connexion Office ou actualisez manuellement",
+                    inline=False
+                )
+            
+            # Éditer le message existant
+            await interaction.edit_original_response(embed=embed)
+            
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Erreur d'actualisation",
+                description=f"```{str(e)}```",
+                color=discord.Color.red()
             )
-        
-        # Ajouter quelques infos supplémentaires
-        embed.add_field(
-            name="📅 Date",
-            value=project_result.get("date", "Non disponible"),
-            inline=True
-        )
-        
-        embed.add_field(
-            name="💾 Token",
-            value="🔄 Expire dans ~1h\n⚠️ Actualisez si nécessaire",
-            inline=True
-        )
-        
-        await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.edit_original_response(embed=embed)
 
 
 class RefreshView(discord.ui.View):
@@ -150,8 +142,9 @@ class RefreshView(discord.ui.View):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
-            # Limiter au nombre demandé
-            limited_results = results[:self.nombre]
+            # Trier par date (plus récent en premier) puis limiter au nombre demandé
+            results_sorted = sorted(results, key=lambda x: x.get("date", ""), reverse=True)
+            limited_results = results_sorted[:self.nombre]
             
             # Créer le nouvel embed
             if hasattr(self.epitech_api, 'format_summary'):
@@ -171,10 +164,21 @@ class RefreshView(discord.ui.View):
                     total_tests = sum(skill.get("count", 0) for skill in skills.values())
                     total_passed = sum(skill.get("passed", 0) for skill in skills.values())
                     rate = (total_passed / total_tests * 100) if total_tests > 0 else 0
+                    
+                    # Choisir les couleurs selon le taux de réussite
+                    if rate >= 100:
+                        emoji = "✅"
+                    elif rate >= 80:
+                        emoji = "🟡"
+                    elif rate >= 50:
+                        emoji = "🟠"
+                    else:
+                        emoji = "❌"
+                    
                     progress = self.epitech_api._generate_progress_bar(total_passed, total_tests, 10)
                     
                     embed.add_field(
-                        name=f"📋 {name}",
+                        name=f"{emoji} {name}",
                         value=f"📊 {total_passed}/{total_tests} ({rate:.1f}%)\n📈 {progress}",
                         inline=False
                     )
@@ -244,6 +248,58 @@ class MouliCordSlashCommands(commands.Cog):
             except Exception as local_err:
                 return None, api_error
 
+    async def _run_check_now(self) -> discord.Embed:
+        """Exécute la vérification immédiate et retourne l'embed approprié."""
+        try:
+            results = self.epitech_api.get_moulinette_results(2025)
+            if results:
+                embed = discord.Embed(
+                    title="🔍 Vérification terminée",
+                    description=f"{len(results)} projet(s) trouvés dans les résultats actuels",
+                    color=discord.Color.blue(),
+                    timestamp=datetime.now()
+                )
+                # Trier par date (plus récent en premier) puis prendre les 3 premiers
+                results_sorted = sorted(results, key=lambda x: x.get("date", ""), reverse=True)
+                for i, result in enumerate(results_sorted[:3]):
+                    # Extraire le nom du projet depuis la structure correcte
+                    project_data = result.get("project", {})
+                    project_name = project_data.get("name", "Projet inconnu")
+                    
+                    skills = result.get("results", {}).get("skills", {})
+                    total_tests = sum(skill.get("count", 0) for skill in skills.values())
+                    total_passed = sum(skill.get("passed", 0) for skill in skills.values())
+                    rate = (total_passed / total_tests * 100) if total_tests > 0 else 0
+                    
+                    # Choisir l'emoji selon le taux de réussite
+                    if rate >= 100:
+                        emoji = "✅"
+                    elif rate >= 80:
+                        emoji = "🟡"
+                    elif rate >= 50:
+                        emoji = "🟠"
+                    else:
+                        emoji = "❌"
+                    
+                    embed.add_field(
+                        name=f"{emoji} {project_name}",
+                        value=f"📊 {total_passed}/{total_tests} ({rate:.1f}%)",
+                        inline=True
+                    )
+            else:
+                embed = discord.Embed(
+                    title="❌ Erreur",
+                    description="Récupération des résultats impossible",
+                    color=discord.Color.red()
+                )
+            return embed
+        except Exception as e:
+            return discord.Embed(
+                title="❌ Erreur lors de la vérification",
+                description=f"```{str(e)}```",
+                color=discord.Color.red()
+            )
+
     @app_commands.command(name="ping", description="🏓 Teste la latence du bot")
     async def ping_slash(self, interaction: discord.Interaction):
         """Slash command pour tester la latence"""
@@ -282,14 +338,15 @@ class MouliCordSlashCommands(commands.Cog):
             if not results:
                 embed = discord.Embed(
                     title="❌ Aucun résultat disponible",
-                    description="• ⚠️ Token expiré (validité ~1h)\n• 📡 API inaccessible (403 Forbidden)\n• 💾 Aucune donnée locale disponible\n\n💡 Utilisez `/refresh_token` puis réessayez",
+                    description="• ⚠️ Token expiré (validité ~1h)\n• 📡 API inaccessible (403 Forbidden)\n• 💾 Aucune donnée locale disponible\n\n💡 Utilisez `/token` puis cliquez sur 'Actualiser Token'",
                     color=discord.Color.red()
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
-            # Limiter aux résultats demandés
-            limited_results = results[:nombre]
+            # Trier par date (plus récent en premier) puis limiter aux résultats demandés
+            results_sorted = sorted(results, key=lambda x: x.get("date", ""), reverse=True)
+            limited_results = results_sorted[:nombre]
             
             # Créer l'embed manuellement (format_summary peut ne pas être disponible)
             embed = discord.Embed(
@@ -310,20 +367,39 @@ class MouliCordSlashCommands(commands.Cog):
                 total_passed = sum(skill.get("passed", 0) for skill in skills.values())
                 rate = (total_passed / total_tests * 100) if total_tests > 0 else 0
                 
-                # Créer une barre de progression simple
+                # Créer une barre de progression colorée
                 progress_length = 10
                 filled = int((total_passed / total_tests) * progress_length) if total_tests > 0 else 0
-                progress_bar = "█" * filled + "░" * (progress_length - filled)
+                
+                # Choisir les couleurs selon le taux de réussite (carrés)
+                if rate >= 100:
+                    filled_char = "🟩"
+                    empty_char = "⬜"
+                    emoji = "✅"
+                elif rate >= 80:
+                    filled_char = "🟨"
+                    empty_char = "⬜"
+                    emoji = "🟡"
+                elif rate >= 50:
+                    filled_char = "🟧"
+                    empty_char = "⬜"
+                    emoji = "🟠"
+                else:
+                    filled_char = "🟥"
+                    empty_char = "⬜"
+                    emoji = "❌"
+                
+                progress_bar = filled_char * filled + empty_char * (progress_length - filled)
                 
                 embed.add_field(
-                    name=f"📋 {name}",
+                    name=f"{emoji} {name}",
                     value=f"📊 {total_passed}/{total_tests} ({rate:.1f}%)\n📈 {progress_bar}",
                     inline=False
                 )
             
             # Footer avec info sur le token
             if error_msg:
-                embed.set_footer(text="Mode dégradé • Utilisez /refresh_token pour des données récentes")
+                embed.set_footer(text="Mode dégradé • Utilisez /token pour actualiser")
             else:
                 embed.set_footer(text="Token valide ~1h • Actualisation automatique")
             
@@ -338,100 +414,8 @@ class MouliCordSlashCommands(commands.Cog):
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="details", description="🔍 Sélectionne et affiche les détails d'un projet")
-    async def details_slash(self, interaction: discord.Interaction):
-        """Slash command pour les détails d'un projet avec menu déroulant"""
-        await interaction.response.defer(thinking=True)
-        
-        try:
-            # Utiliser la méthode avec fallback
-            results, error_msg = await self.get_results_with_fallback(2025)
-            
-            if not results:
-                embed = discord.Embed(
-                    title="❌ Aucun résultat disponible",
-                    description="• ⚠️ Token expiré (validité ~1h)\n• 📡 API inaccessible (403 Forbidden)\n• 💾 Aucune donnée locale disponible\n\n💡 Utilisez `/refresh_token` puis réessayez",
-                    color=discord.Color.red(),
-                    timestamp=datetime.now()
-                )
-                
-                embed.add_field(
-                    name="🔧 Actions recommandées",
-                    value="1️⃣ `/refresh_token` - Renouveler le token\n2️⃣ `/status` - Vérifier l'état du système\n3️⃣ Réessayer dans quelques minutes",
-                    inline=False
-                )
-                
-                if error_msg:
-                    embed.add_field(
-                        name="🐛 Détail de l'erreur",
-                        value=f"```{error_msg[:200]}```",
-                        inline=False
-                    )
-                
-                await interaction.followup.send(embed=embed, ephemeral=True)
-                return
-            
-            # Créer le menu déroulant avec les projets disponibles
-            view = ProjectDetailsView(results, self.epitech_api)
-            
-            # Indication de la source des données
-            source_info = "Source: 🌐 Temps réel" if not error_msg else "Source: 💾 Cache local (token expiré)"
-            
-            embed = discord.Embed(
-                title="🔍 Détails de Projet",
-                description=f"📊 **{len(results)} projets disponibles** • {source_info}\n\n🎯 Sélectionnez un projet dans le menu déroulant ci-dessous pour voir ses détails complets.",
-                color=discord.Color.blue() if not error_msg else discord.Color.orange(),
-                timestamp=datetime.now()
-            )
-            
-            embed.add_field(
-                name="📋 Instructions",
-                value="• Choisissez un projet via le menu\n• Les détails s'affichent automatiquement\n• Seuls les projets avec résultats sont listés",
-                inline=False
-            )
-            
-            if error_msg:
-                embed.add_field(
-                    name="⚠️ Mode dégradé",
-                    value="Token expiré • Données depuis le cache local\nUtilisez `/refresh_token` pour des données récentes",
-                    inline=False
-                )
-            else:
-                embed.add_field(
-                    name="🔐 Token",
-                    value="Valide ~1h\nActualisez si nécessaire",
-                    inline=False
-                )
-            
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-            
-        except Exception as e:
-            embed = discord.Embed(
-                title="❌ Erreur Critique",
-                description=f"Une erreur inattendue s'est produite:\n```{str(e)[:300]}```",
-                color=discord.Color.red(),
-                timestamp=datetime.now()
-            )
-            
-            embed.add_field(
-                name="🔧 Actions recommandées",
-                value="• Vérifiez `/status` pour l'état du système\n• Utilisez `/refresh_token` si nécessaire\n• Contactez l'administrateur si le problème persiste",
-                inline=False
-            )
-            
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @app_commands.command(name="watch", description="🔄 Surveillance automatique des résultats")
-    async def watch_slash(self, interaction: discord.Interaction):
-        """Slash command pour la surveillance"""
-        embed = discord.Embed(
-            title="🔄 Surveillance active",
-            description="La surveillance des nouveaux résultats est active.\n\n📡 Vérification toutes les 5 minutes\n🔔 Notifications automatiques avec @everyone",
-            color=discord.Color.green(),
-            timestamp=datetime.now()
-        )
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+    # (/details supprimée)
+    # (/watch supprimée)
 
     @app_commands.command(name="status", description="📊 Affiche le statut du bot et de l'API")
     async def status_slash(self, interaction: discord.Interaction):
@@ -510,47 +494,10 @@ class MouliCordSlashCommands(commands.Cog):
         """Slash command pour vérification immédiate"""
         await interaction.response.defer(thinking=True)
         
-        try:
-            # Effectuer la vérification
-            results = self.epitech_api.get_moulinette_results(2025)
-            
-            if results:
-                embed = discord.Embed(
-                    title="🔍 Vérification terminée",
-                    description=f"{len(results)} projet(s) trouvés dans les résultats actuels",
-                    color=discord.Color.blue(),
-                    timestamp=datetime.now()
-                )
-                
-                # Afficher un aperçu des 3 derniers résultats
-                for i, result in enumerate(results[:3]):
-                    module = result.get("module", "Inconnu")
-                    skills = result.get("results", {}).get("skills", {})
-                    total_tests = sum(skill.get("count", 0) for skill in skills.values())
-                    total_passed = sum(skill.get("passed", 0) for skill in skills.values())
-                    rate = (total_passed / total_tests * 100) if total_tests > 0 else 0
-                    
-                    embed.add_field(
-                        name=f"📁 {module}",
-                        value=f"📊 {total_passed}/{total_tests} ({rate:.1f}%)",
-                        inline=True
-                    )
-            else:
-                embed = discord.Embed(
-                    title="❌ Erreur",
-                    description="Récupération des résultats impossible",
-                    color=discord.Color.red()
-                )
-            
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            
-        except Exception as e:
-            embed = discord.Embed(
-                title="❌ Erreur lors de la vérification",
-                description=f"```{str(e)}```",
-                color=discord.Color.red()
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
+        embed = await self._run_check_now()
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # (Alias /force_check supprimé)
 
     @app_commands.command(name="stats", description="📈 Statistiques complètes des résultats")
     async def stats_slash(self, interaction: discord.Interaction):
@@ -657,56 +604,6 @@ class MouliCordSlashCommands(commands.Cog):
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="backup", description="💾 Créer une sauvegarde des résultats")
-    async def backup_slash(self, interaction: discord.Interaction):
-        """Slash command pour créer un backup"""
-        await interaction.response.defer(thinking=True)
-        
-        try:
-            import shutil
-            
-            # Créer une sauvegarde avec timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_name = f"results_backup_{timestamp}.json"
-            
-            shutil.copy2("results_history.json", backup_name)
-            
-            # Statistiques du backup
-            try:
-                with open("results_history.json", "r") as f:
-                    data = json.load(f)
-                    entries_count = len(data)
-            except:
-                entries_count = 0
-            
-            embed = discord.Embed(
-                title="💾 Sauvegarde Créée",
-                description=f"✅ Backup créé avec succès !",
-                color=discord.Color.green(),
-                timestamp=datetime.now()
-            )
-            
-            embed.add_field(
-                name="📄 Fichier",
-                value=f"`{backup_name}`",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="📊 Contenu",
-                value=f"{entries_count} entrées sauvegardées",
-                inline=True
-            )
-            
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            
-        except Exception as e:
-            embed = discord.Embed(
-                title="❌ Erreur de sauvegarde",
-                description=f"```{str(e)}```",
-                color=discord.Color.red()
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="clear_storage", description="🗑️ Vider le stockage des résultats")
     async def clear_storage_slash(self, interaction: discord.Interaction):
@@ -731,7 +628,7 @@ class MouliCordSlashCommands(commands.Cog):
 
     @app_commands.command(name="token", description="🔐 Vérifie le token Epitech (durée de vie: 1h)")
     async def token_slash(self, interaction: discord.Interaction):
-        """Slash command pour vérifier le token"""
+        """Slash command pour vérifier le token avec bouton de rafraîchissement"""
         
         await interaction.response.defer(thinking=True)
         
@@ -744,8 +641,17 @@ class MouliCordSlashCommands(commands.Cog):
                 color=discord.Color.green(),
                 timestamp=datetime.now()
             )
-                
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+            # Ajouter des informations supplémentaires
+            embed.add_field(
+                name="🔧 Actions",
+                value="• Cliquez sur le bouton ci-dessous pour actualiser\n• Le token expire automatiquement après 1h\n• Actualisation automatique en arrière-plan",
+                inline=False
+            )
+            
+            # Créer la vue avec le bouton de rafraîchissement
+            view = TokenView(self.epitech_api)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             
         except Exception as e:
             embed = discord.Embed(
@@ -755,81 +661,7 @@ class MouliCordSlashCommands(commands.Cog):
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="refresh_token", description="🔄 Force le renouvellement du token (1h de validité)")
-    async def refresh_token_slash(self, interaction: discord.Interaction):
-        """Slash command pour actualiser le token"""
-        await interaction.response.defer(thinking=True)
-        
-        try:
-            # Message de début
-            embed = discord.Embed(
-                title="🔄 Renouvellement du Token",
-                description="⏳ Génération d'un nouveau token (valide 1h)...",
-                color=discord.Color.blue(),
-                timestamp=datetime.now()
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            
-            # Lancer l'actualisation avec Selenium
-            # Ne jamais écrire le token dans des fichiers/env
-            success = auto_refresh_token(headless=True, update_env=False)
-            
-            if success:
-                # Vérifier le nouveau token
-                try:
-                    # Demander au bot de régénérer un token en mémoire et relier l'API
-                    import bot as bot_module
-                    if bot_module.ensure_valid_token() and getattr(bot_module, 'epitech_api', None):
-                        self.update_epitech_api(bot_module.epitech_api)
-                        print("🔗 Cog relié à la nouvelle instance EpitechAPI (mémoire) après refresh")
-                except Exception:
-                    pass
-
-                new_token_info = self.epitech_api.check_token_expiration()
-                
-                embed = discord.Embed(
-                    title="✅ Token Actualisé",
-                    description="🎉 Le token a été actualisé avec succès !",
-                    color=discord.Color.green(),
-                    timestamp=datetime.now()
-                )
-                
-                embed.add_field(
-                    name="🔑 Nouveau Token",
-                    value=new_token_info,
-                    inline=False
-                )
-                
-                embed.add_field(
-                    name="🔧 Méthode",
-                    value="✅ Selenium + Office persistant",
-                    inline=True
-                )
-                
-            else:
-                embed = discord.Embed(
-                    title="❌ Échec de l'actualisation",
-                    description="Impossible d'actualiser le token automatiquement",
-                    color=discord.Color.red(),
-                    timestamp=datetime.now()
-                )
-                
-                embed.add_field(
-                    name="💡 Solution",
-                    value="Vérifiez votre connexion Office ou actualisez manuellement",
-                    inline=False
-                )
-            
-            # Éditer le message existant
-            await interaction.edit_original_response(embed=embed)
-            
-        except Exception as e:
-            embed = discord.Embed(
-                title="❌ Erreur d'actualisation",
-                description=f"```{str(e)}```",
-                color=discord.Color.red()
-            )
-            await interaction.edit_original_response(embed=embed)
+    # (/refresh_token supprimée - fonctionnalité intégrée dans /token)
 
     @app_commands.command(name="history", description="📈 Analyse l'historique d'un projet avec sélection interactive")
     async def history_slash(self, interaction: discord.Interaction):
@@ -837,13 +669,13 @@ class MouliCordSlashCommands(commands.Cog):
         await interaction.response.defer(thinking=True)
         
         try:
-            # Récupérer tous les résultats pour extraire les projets disponibles
-            results = self.epitech_api.get_moulinette_results(2025)
+            # Récupérer tous les résultats avec fallback automatique
+            results, error_msg = await self.get_results_with_fallback(2025)
             
             if not results:
                 embed = discord.Embed(
-                    title="❌ Aucun résultat",
-                    description="Impossible de récupérer les projets disponibles",
+                    title="❌ Aucun résultat disponible",
+                    description="• ⚠️ Token expiré (validité ~1h)\n• 📡 API inaccessible (403 Forbidden)\n• 💾 Aucune donnée locale disponible\n\n💡 Utilisez `/token` puis cliquez sur 'Actualiser Token'",
                     color=discord.Color.red()
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
@@ -852,13 +684,22 @@ class MouliCordSlashCommands(commands.Cog):
             # Extraire tous les projets uniques avec leurs informations
             projects_map = {}
             for result in results:
-                module = result.get("module", "")
-                if module and module not in projects_map:
-                    project_name = result.get("project_name", module.split("/")[-1] if "/" in module else module)
-                    projects_map[module] = {
-                        "name": project_name,
-                        "module": module
-                    }
+                # Extraire les informations du projet depuis la structure correcte
+                project_data = result.get("project", {})
+                module_code = project_data.get("module", {}).get("code", "")
+                project_slug = project_data.get("slug", "")
+                project_name = project_data.get("name", project_slug)
+                
+                # Construire l'ID du projet au format "module/project"
+                if module_code and project_slug:
+                    project_id = f"{module_code}/{project_slug}"
+                    
+                    if project_id not in projects_map:
+                        projects_map[project_id] = {
+                            "name": project_name,
+                            "module": module_code,
+                            "slug": project_slug
+                        }
             
             if not projects_map:
                 embed = discord.Embed(
@@ -1019,13 +860,27 @@ class HistoryProjectSelect(discord.ui.Select):
         await interaction.response.defer()
         
         try:
-            # Récupérer l'historique du projet
+            # Vérifier que l'API est disponible
+            if not self.epitech_api:
+                embed = discord.Embed(
+                    title="❌ API non disponible",
+                    description="L'API Epitech n'est pas initialisée. Utilisez `/token` pour la réinitialiser.",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+            
+            # Récupérer l'historique du projet (API + fallback local)
             history = self.epitech_api.get_project_history(selected_project)
+            
+            # Si pas d'historique via API, essayer de construire depuis les données locales
+            if not history:
+                history = self._get_local_project_history(selected_project)
             
             if not history:
                 embed = discord.Embed(
                     title="❌ Aucun historique",
-                    description=f"Aucun historique trouvé pour le projet `{selected_project}`",
+                    description=f"Aucun historique trouvé pour le projet `{selected_project}`\n\n💡 Vérifiez que le projet existe et que vous avez des résultats pour celui-ci.",
                     color=discord.Color.red()
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
@@ -1104,6 +959,36 @@ class HistoryProjectSelect(discord.ui.Select):
         total_tests = sum(skill.get("count", 0) for skill in skills.values())
         total_passed = sum(skill.get("passed", 0) for skill in skills.values())
         return (total_passed / total_tests * 100) if total_tests > 0 else 0
+    
+    def _get_local_project_history(self, project_id: str):
+        """Construit l'historique d'un projet depuis les données locales"""
+        try:
+            # Charger les données locales
+            with open("results_history.json", "r") as f:
+                data = json.load(f)
+            
+            results = data.get("results", [])
+            
+            # Filtrer les résultats pour ce projet
+            project_history = []
+            for result in results:
+                project_data = result.get("project", {})
+                module_code = project_data.get("module", {}).get("code", "")
+                project_slug = project_data.get("slug", "")
+                
+                if module_code and project_slug:
+                    current_project_id = f"{module_code}/{project_slug}"
+                    if current_project_id == project_id:
+                        project_history.append(result)
+            
+            # Trier par date (plus récent en premier)
+            project_history.sort(key=lambda x: x.get("date", ""), reverse=True)
+            
+            return project_history
+            
+        except Exception as e:
+            print(f"Erreur lors de la récupération de l'historique local pour {project_id}: {e}")
+            return []
 
 
 class HistoryView(discord.ui.View):
@@ -1249,7 +1134,6 @@ class HelpView(discord.ui.View):
                 "description": "**Commandes essentielles pour surveiller vos résultats:**",
                 "fields": [
                     {"name": "`/results`", "value": "📊 Derniers résultats avec actualisation", "inline": False},
-                    {"name": "`/details`", "value": "🔍 Menu déroulant de sélection de projet", "inline": False},
                     {"name": "`/history`", "value": "📈 Sélection projet + navigation", "inline": False},
                     {"name": "`/stats`", "value": "📈 Statistiques complètes", "inline": False}
                 ]
@@ -1260,16 +1144,14 @@ class HelpView(discord.ui.View):
                 "fields": [
                     {"name": "`/status`", "value": "📊 État du bot, API et token", "inline": False},
                     {"name": "`/check_now`", "value": "🔄 Vérification immédiate", "inline": False},
-                    {"name": "`/token`", "value": "🔐 Vérification du token", "inline": False},
-                    {"name": "`/refresh_token`", "value": "🔄 Actualisation du token", "inline": False},
-                    {"name": "`/watch`", "value": "👁️ Statut de surveillance", "inline": False}
+                    {"name": "`/token`", "value": "🔐 Vérification + actualisation du token", "inline": False}
                 ]
             },
             {
                 "title": "💾 Gestion des Données", 
                 "description": "**Sauvegarde et maintenance:**",
                 "fields": [
-                    {"name": "`/backup`", "value": "💾 Sauvegarde horodatée", "inline": False},
+                    
                     {"name": "`/clear_storage`", "value": "🗑️ Vider le stockage", "inline": False},
                     {"name": "`/help`", "value": "❓ Ce guide interactif", "inline": False}
                 ]

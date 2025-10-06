@@ -1,74 +1,24 @@
-# MouliCord v2.0 🚀
+# MouliCord 🚀
 
-## **Le Bot Discord Epitech 100% Moderne** 🎮
+## **Le Bot Discord Epitech le plus avancé** 🎮
 
-**Interface entièrement convertie aux Slash Commands avec composants interactifs !**
-
----
-
-## ✨ **MouliCord v2.0 - Conversion Complète**
-
-🎯 **TOUTES les commandes sont maintenant des Slash Commands !**
-
-- ❌ **Fini les `!commandes`** - Interface dépassée supprimée
-- ✅ **100% `/slash_commands`** - Interface Discord moderne
-- 📱 **Composants interactifs** - Boutons, menus, navigation
-- 🎮 **UX optimale** - Plus intuitive et professionnelle
+**Surveillance automatique des résultats de moulinette avec interface moderne et composants interactifs !**
 
 ---
 
-## 🎮 **Commandes Slash Disponibles**
-
-| Commande | Description | Interface |
-|----------|-------------|-----------|
-| `/mouli` | 📊 Derniers résultats | 🔄 Bouton actualisation |
-| `/details <projet>` | 🔍 Détails projet spécifique | 📈 Statistiques détaillées |
-| `/history` | 📈 Sélection projet + historique | 📋 Liste projets + 📅 Navigation historique |
-| `/stats` | 📊 Statistiques complètes | 🏆 Classements + graphiques |
-| `/status` | 🔧 État du système | 📡 API + Token + Stockage |
-| `/check_now` | 🔄 Vérification immédiate | ⚡ Force la vérification |
-| `/token` | 🔐 Vérification token | ⏰ Temps restant + validité |
-| `/refresh_token` | 🔄 Actualisation automatique | 🤖 Selenium + Office |
-| `/watch` | 👁️ Statut surveillance | ✅ Toujours active 24/7 |
-| `/backup` | 💾 Sauvegarde horodatée | 📄 Fichier timestampé |
-| `/clear_storage` | 🗑️ Vider stockage | ⚠️ Confirmation interactive |
-| `/help` | ❓ Guide complet | 📖 Navigation par pages |
-
----
-
-## 🎯 **Exemples d'Utilisation**
-
-### **Navigation Moderne :**
-```
-/mouli                                # 📊 + 🔄 Bouton actualisation
-/history                              # 📋 Sélection projet + 📅 Navigation
-/stats                                # 📈 Statistiques + 🏆 Classements
-/status                               # 📡 État complet du système
-```
-
-### **Gestion Système :**
-```
-/token                                # 🔐 Vérification rapide
-/refresh_token                        # 🤖 Actualisation Selenium
-/backup                               # 💾 Sauvegarde automatique
-/help                                 # 📖 Guide interactif
-```
-
----
-
-## 📊 **Fonctionnalités Avancées**
+## ✨ **Fonctionnalités Principales**
 
 ### 🔄 **Surveillance Automatique 24/7**
-- ✅ **Vérification toutes les 10 minutes**
-- 🔔 **Notifications @everyone** pour nouveaux résultats
+- ✅ **Vérification toutes les 5 minutes** des nouveaux résultats
+- 🔔 **Notifications @everyone** pour les nouveaux résultats
 - 💾 **Sauvegarde automatique** dans `results_history.json`
 - 🛡️ **Gestion d'erreurs robuste** avec retry automatique
 
 ### 🤖 **Automation Selenium Ultra-Rapide**
-- 🚀 **Sessions Office persistantes permanentes**
+- 🚀 **Sessions Office persistantes** (jamais supprimées)
 - ⚡ **Détection intelligente de redirections**
-- 🔍 **Récupération automatique de tokens**
-- 💾 **Profils Chrome permanents** (jamais supprimés)
+- 🔍 **Récupération automatique de tokens** (validité 1h)
+- 💾 **Profils Chrome permanents** pour performance optimale
 
 ### 📱 **Interface Moderne Discord**
 - 🎮 **Slash Commands natifs** avec autocomplétion
@@ -76,6 +26,47 @@
 - 🔄 **Boutons d'actualisation** intégrés
 - 📈 **Navigation par pages** dans l'aide et l'historique
 - ⚠️ **Confirmations interactives** pour actions sensibles
+
+---
+
+## 🎮 **Commandes Disponibles**
+
+| Commande | Description | Interface |
+|----------|-------------|-----------|
+| `/mouli` | 📊 Derniers résultats | 🔄 Bouton actualisation + barres colorées |
+| `/history` | 📈 Sélection projet + historique | 📋 Liste projets + 📅 Navigation historique |
+| `/stats` | 📊 Statistiques complètes | 🏆 Classements + graphiques |
+| `/status` | 🔧 État du système | 📡 API + Token + Stockage |
+| `/check_now` | 🔄 Vérification immédiate | ⚡ Force la vérification |
+| `/token` | 🔐 Vérification + actualisation | ⏰ Temps restant + bouton refresh |
+| `/clear_storage` | 🗑️ Vider stockage | ⚠️ Confirmation interactive |
+| `/help` | ❓ Guide complet | 📖 Navigation par pages |
+| `/info` | ℹ️ Informations + outils | 🏓 Ping + 📊 Status |
+
+---
+
+## 🎯 **Exemples d'Utilisation**
+
+### **Navigation des Résultats :**
+```
+/mouli                                # 📊 Derniers résultats avec actualisation
+/history                              # 📋 Sélection projet + navigation historique
+/stats                                # 📈 Statistiques complètes avec classements
+```
+
+### **Gestion du Système :**
+```
+/token                                # 🔐 Vérification + actualisation du token
+/status                               # 📡 État complet du système
+/check_now                            # ⚡ Vérification immédiate
+```
+
+### **Outils et Aide :**
+```
+/info                                 # ℹ️ Informations + boutons Ping & Status
+/help                                 # 📖 Guide interactif complet
+/clear_storage                        # 🗑️ Vider le stockage (avec confirmation)
+```
 
 ---
 
@@ -91,9 +82,10 @@ pip install discord.py python-dotenv requests selenium webdriver-manager
 ```bash
 # Créer le fichier .env
 DISCORD_BOT_TOKEN=your_discord_bot_token
-EPITECH_API_TOKEN=your_epitech_bearer_token
 CHANNEL_ID=your_discord_channel_id
 ```
+
+**Note :** Le token Epitech est généré automatiquement au démarrage (validité ~1h)
 
 ### **3. Démarrage**
 ```bash
@@ -102,16 +94,18 @@ python bot.py
 
 ---
 
-## 📈 **Architecture v2.0**
+## 📊 **Architecture du Projet**
 
 ### **Fichiers Principaux :**
-- **`bot.py`** - Bot principal avec surveillance automatique + `/info`
-- **`slash_commands.py`** - 🎮 **TOUTES les Slash Commands** (12 commandes)
+- **`bot.py`** - Bot principal avec surveillance automatique + commande `/info`
+- **`slash_commands.py`** - Toutes les Slash Commands (9 commandes)
 - **`epitech_api.py`** - API Epitech avec fonctions avancées
 - **`token_refresher.py`** - Automation Selenium avec sessions persistantes
 
 ### **Composants Interactifs :**
-- **`MouliResultsView`** - Vue avec boutons d'actualisation
+- **`RefreshView`** - Boutons d'actualisation des résultats
+- **`TokenView`** - Bouton de rafraîchissement du token
+- **`InfoView`** - Boutons Ping et Status
 - **`ProjectSelectionView`** - Sélection de projets par menu déroulant
 - **`HistoryView`** - Navigation dans l'historique par passages
 - **`HelpView`** - Guide d'aide avec navigation par pages
@@ -124,91 +118,64 @@ python bot.py
 
 ---
 
-## 🔧 **Migration depuis v1.x**
+## 🎨 **Interface Utilisateur**
 
-### ❌ **Supprimées (v1.x):**
-```bash
-!mouli                  # Remplacé par /mouli
-!details <projet>       # Remplacé par /details <projet>  
-!history <projet>       # Remplacé par /history (avec sélection)
-!stats                  # Remplacé par /stats
-!status                 # Remplacé par /status
-!check_now              # Remplacé par /check_now
-!token                  # Remplacé par /token
-!refresh_token          # Remplacé par /refresh_token
-!watch                  # Remplacé par /watch
-!backup                 # Remplacé par /backup
-!clear_storage          # Remplacé par /clear_storage
-!help_mouli             # Remplacé par /help
+### **Exemple avec `/mouli` :**
+```
+📊 Résultats Moulinette (5 derniers)
+Source: 🌐 Temps réel
+
+✅ C Pool Day 11
+📊 11/11 (100.0%)
+📈 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
+
+✅ Lib Workshop
+📊 29/29 (100.0%)
+📈 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
+
+🟡 C Pool Day 10
+📊 5/6 (83.3%)
+📈 🟨🟨🟨🟨🟨🟨🟨🟨⬜⬜
+
+[🔄 Actualiser]
 ```
 
-### ✅ **Nouvelles (v2.0):**
-- **Interface 100% Slash Commands** avec autocomplétion Discord
-- **Composants interactifs** remplaçant les paramètres manuels
-- **Menus déroulants** pour sélections intuitives
-- **Boutons d'action** pour actualisation et navigation
-- **Confirmations interactives** pour sécurité
+### **Exemple avec `/history` :**
+```
+📋 Sélection du Projet
+Choisissez un projet pour analyser son historique complet.
+
+📊 16 projets disponibles
+
+[Menu déroulant avec tous les projets]
+→ Sélection "C Pool Day 11"
+→ [Embed avec historique + navigation ◀️ ▶️]
+```
 
 ---
 
-## 🚀 **Avantages v2.0**
+## 🚀 **Avantages**
 
 ### **🎮 UX Moderne :**
 - ✅ **Autocomplétion** Discord native
-- ✅ **Paramètres suggérés** automatiquement  
-- ✅ **Interface graphique** au lieu de texte
-- ✅ **Navigation fluide** avec boutons et menus
+- ✅ **Interface graphique** avec boutons et menus
+- ✅ **Navigation fluide** et intuitive
+- ✅ **Feedback visuel** avec couleurs et emojis
 
 ### **⚡ Performance :**
 - ✅ **Code optimisé** et restructuré
 - ✅ **Gestion d'erreurs améliorée**
-- ✅ **Moins de requêtes** grâce à la mise en cache
+- ✅ **Mise en cache intelligente**
 - ✅ **Interface responsive** avec composants asynchrones
 
 ### **🔧 Maintenance :**
 - ✅ **Architecture modulaire** avec Cogs
-- ✅ **Séparation des responsabilités** 
-- ✅ **Code plus maintenable** et extensible
+- ✅ **Séparation des responsabilités**
+- ✅ **Code maintenable** et extensible
 - ✅ **Compatibilité future** avec Discord
 
 ---
 
-## 📱 **Interface Utilisateur**
+## 🔥 **MouliCord - Le bot Discord Epitech le plus avancé !**
 
-### **Avant (v1.x) :**
-```
-Utilisateur: !history G-CPE-100/cpoolday09
-Bot: [Texte brut avec données]
-```
-
-### **Après (v2.0) :**
-```
-Utilisateur: /history
-Bot: [Menu déroulant avec tous les projets]
-     → Sélection "CPE Piscine - Day 09"
-     → [Embed moderne avec navigation boutons ◀️ ▶️]
-     → [Menu historique par passage avec dates]
-```
-
----
-
-## 🎯 **Commande de Migration**
-
-Pour tester la nouvelle interface :
-
-```bash
-# Au lieu de !mouli
-/mouli
-
-# Au lieu de !history G-CPE-100/cpoolday09  
-/history → Sélection dans menu → Navigation
-
-# Au lieu de !help_mouli
-/help → Navigation par pages interactives
-```
-
----
-
-## 🔥 **MouliCord v2.0 - Le bot Discord Epitech le plus avancé !**
-
-**✨ Interface 100% moderne • 🎮 Slash Commands • 📱 Composants interactifs • ⚡ Ultra-rapide**
+**✨ Interface 100% moderne • 🎮 Slash Commands • 📱 Composants interactifs • ⚡ Ultra-rapide • 🤖 Automation complète**

@@ -419,6 +419,7 @@ class EpitechAPI:
             
             result = {
                 "expires_at": exp_datetime.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "exp_epoch": int(exp_datetime.timestamp()),
                 "is_expired": now > exp_datetime,
                 "days_remaining": days,
                 "hours_remaining": hours,
@@ -430,6 +431,7 @@ class EpitechAPI:
             if 'iat' in payload_data:
                 issued_at = datetime.fromtimestamp(payload_data['iat'], tz=timezone.utc)
                 result["issued_at"] = issued_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                result["iat_epoch"] = int(issued_at.timestamp())
             
             if 'sub' in payload_data:
                 result["subject"] = payload_data['sub']
@@ -475,10 +477,17 @@ class EpitechAPI:
         # Ajouter des informations supplémentaires
         result = f"✅ **Token valide**\n"
         result += f"⏰ Temps restant: **{time_left}**\n"
-        result += f"📅 Expire le: {token_info['expires_at']}"
+        # Ajouter un timestamp relatif Discord si possible
+        if "exp_epoch" in token_info:
+            result += f"📅 Expire le: <t:{token_info['exp_epoch']}:F> (<t:{token_info['exp_epoch']}:R>)"
+        else:
+            result += f"📅 Expire le: {token_info['expires_at']}"
         
         if "issued_at" in token_info:
-            result += f"\n🕐 Émis le: {token_info['issued_at']}"
+            if "iat_epoch" in token_info:
+                result += f"\n🕐 Émis le: <t:{token_info['iat_epoch']}:F> (<t:{token_info['iat_epoch']}:R>)"
+            else:
+                result += f"\n🕐 Émis le: {token_info['issued_at']}"
         
         return result
     

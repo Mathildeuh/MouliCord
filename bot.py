@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands, tasks
 import os
 import time
+import json
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from epitech_api import EpitechAPI
@@ -201,6 +202,152 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 channel_id = int(os.getenv('CHANNEL_ID', '0'))
 
 
+class InfoView(discord.ui.View):
+    """Vue pour la commande /info avec boutons ping et status"""
+    
+    def __init__(self):
+        super().__init__(timeout=300)  # 5 minutes timeout
+    
+    @discord.ui.button(label="🏓 Ping", style=discord.ButtonStyle.secondary)
+    async def ping_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Bouton pour tester la latence"""
+        await interaction.response.defer()
+        
+        # Calculer la latence
+        latency = round(bot.latency * 1000)  # en millisecondes
+        
+        # Déterminer la couleur selon la latence
+        if latency < 100:
+            color = discord.Color.green()
+            status = "Excellent"
+            emoji = "🟢"
+        elif latency < 200:
+            color = discord.Color.orange()
+            status = "Bon"
+            emoji = "🟡"
+        elif latency < 500:
+            color = discord.Color.orange()
+            status = "Moyen"
+            emoji = "🟠"
+        else:
+            color = discord.Color.red()
+            status = "Lent"
+            emoji = "🔴"
+        
+        embed = discord.Embed(
+            title="🏓 Pong!",
+            description=f"**Latence:** {latency}ms\n**Statut:** {emoji} {status}",
+            color=color,
+            timestamp=datetime.now()
+        )
+        
+        embed.add_field(
+            name="📊 Détails",
+            value=f"• Latence WebSocket: {latency}ms\n• Statut: {status}\n• Temps de réponse: Instantané",
+            inline=False
+        )
+        
+        embed.set_footer(text="MouliCord v2.0 • Test de connectivité")
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    
+    @discord.ui.button(label="📊 Status", style=discord.ButtonStyle.primary)
+    async def status_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Bouton pour afficher le statut du système"""
+        await interaction.response.defer()
+        
+        try:
+            # Vérifier l'état de l'API
+            try:
+                results = epitech_api.get_moulinette_results(2025) if epitech_api else None
+                api_status = "✅ Connectée et fonctionnelle"
+                
+                # Vérifier le token
+                token_info = epitech_api.check_token_expiration() if epitech_api else None
+                
+            except Exception as e:
+                api_status = f"❌ Erreur: {str(e)[:50]}..."
+                token_info = "❌ Impossible de vérifier"
+            
+            # Statut du stockage
+            try:
+                with open("results_history.json", "r") as f:
+                    data = json.load(f)
+                    results = data.get("results", [])
+                    
+                    # Compter le nombre de projets uniques
+                    projects = set()
+                    for result in results:
+                        project_data = result.get("project", {})
+                        module_code = project_data.get("module", {}).get("code", "")
+                        project_slug = project_data.get("slug", "")
+                        
+                        if module_code and project_slug:
+                            project_id = f"{module_code}/{project_slug}"
+                            projects.add(project_id)
+                    
+                    total_projects = len(projects)
+                    total_entries = len(results)
+                    storage_status = f"✅ {total_projects} projets ({total_entries} entrées)"
+            except:
+                storage_status = "❌ Fichier inaccessible"
+            
+            # Statut du bot
+            bot_status = "✅ En ligne"
+            uptime = "Depuis le démarrage"
+            
+            # Couleur globale
+            if "✅" in api_status and "✅" in storage_status:
+                color = discord.Color.green()
+            elif "❌" in api_status or "❌" in storage_status:
+                color = discord.Color.red()
+            else:
+                color = discord.Color.orange()
+            
+            embed = discord.Embed(
+                title="📊 Statut du Système",
+                description="État complet de MouliCord et de ses composants",
+                color=color,
+                timestamp=datetime.now()
+            )
+            
+            embed.add_field(
+                name="🤖 Bot Discord",
+                value=f"• Statut: {bot_status}\n• Latence: {round(bot.latency * 1000)}ms\n• Uptime: {uptime}",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="🌐 API Epitech",
+                value=f"• Statut: {api_status}\n• Token: {token_info if isinstance(token_info, str) else 'Vérification...'}",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="💾 Stockage Local",
+                value=f"• Projets: {storage_status}\n• Fichier: results_history.json",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="🔧 Surveillance",
+                value="• Vérification: Toutes les 5 minutes\n• Notifications: @everyone\n• Auto-refresh: Token 1h",
+                inline=False
+            )
+            
+            embed.set_footer(text="MouliCord v2.0 • Surveillance système")
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Erreur de Statut",
+                description=f"Impossible de récupérer le statut:\n```{str(e)}```",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 class MouliCordBot:
     """Bot Discord pour les résultats de la moulinette Epitech - Tokens auto-renouvelés toutes les heures"""
     
@@ -322,8 +469,15 @@ moulibot = MouliCordBot()
 @bot.event
 async def on_ready():
     """Événement déclenché quand le bot est prêt"""
+    # Enregistrer le temps de démarrage pour l'uptime
+    bot.start_time = time.time()
+    
     _log_ok(f"Connecté à Discord en tant que {bot.user}")
     _log_info(f"Canal configuré: {channel_id}")
+    
+    # Pas d'activité configurée
+    _log_info("Bot démarré sans activité personnalisée")
+    
     # (Topic du salon désactivé)
     
     # Récupération automatique du token au démarrage
@@ -451,6 +605,8 @@ async def before_check_token_expiration():
     await bot.wait_until_ready()
 
 
+
+
 # Commande hybride pour la compatibilité (optionnelle)
 @bot.hybrid_command(name="info", description="ℹ️ Informations sur MouliCord v2.0")
 async def info_command(ctx):
@@ -470,7 +626,7 @@ async def info_command(ctx):
     
     embed.add_field(
         name="🔧 Gestion",
-        value="• `/token` - Vérifier le token\n• `/refresh_token` - Actualiser\n• `/backup` - Sauvegarde\n• `/help` - Guide complet",
+        value="• `/token` - Vérifier + actualiser le token\n• `/help` - Guide complet\n• Boutons Ping & Status ci-dessous",
         inline=True
     )
     
@@ -480,9 +636,30 @@ async def info_command(ctx):
         inline=False
     )
     
+    # Calculer l'uptime
+    uptime_seconds = int(time.time() - bot.start_time) if hasattr(bot, 'start_time') else 0
+    uptime_days = uptime_seconds // 86400
+    uptime_hours = (uptime_seconds % 86400) // 3600
+    uptime_minutes = (uptime_seconds % 3600) // 60
+    
+    if uptime_days > 0:
+        uptime_str = f"{uptime_days}j {uptime_hours}h {uptime_minutes}m"
+    elif uptime_hours > 0:
+        uptime_str = f"{uptime_hours}h {uptime_minutes}m"
+    else:
+        uptime_str = f"{uptime_minutes}m"
+    
+    embed.add_field(
+        name="🔗 Liens & Informations",
+        value=f"• 📊 **Uptime:** {uptime_str}\n• 🔗 **GitHub:** [MouliCord](https://github.com/Mathildeuh/MouliCord)\n• 💬 **Discord:** [Rejoindre le serveur](https://discord.gg/EGrR4HUzgF)",
+        inline=False
+    )
+    
     embed.set_footer(text="Utilisez /help pour le guide complet • MouliCord v2.0")
     
-    await ctx.send(embed=embed)
+    # Créer la vue avec le bouton ping
+    view = InfoView()
+    await ctx.send(embed=embed, view=view)
 
 
 @bot.hybrid_command(name="test_notification", description="🧪 Tester une notification de moulinette")
@@ -516,35 +693,7 @@ async def test_notification_command(ctx):
         await ctx.send(f"❌ **Erreur lors du test:** {e}")
 
 
-@bot.hybrid_command(name="force_check", description="🔍 Forcer une vérification des nouvelles moulinettes")
-async def force_check_command(ctx):
-    """Commande pour forcer une vérification manuelle"""
-    try:
-        await ctx.send("🔍 **Vérification manuelle en cours...**")
-        
-        # S'assurer que le token est valide
-        if not ensure_valid_token():
-            await ctx.send("❌ **Erreur:** Token Epitech indisponible")
-            return
-
-        if epitech_api:
-            new_results = epitech_api.get_new_results(2025)
-        else:
-            await ctx.send("❌ **Erreur:** API non initialisée")
-            return
-            
-        if new_results:
-            await ctx.send(f"🆕 **{len(new_results)} nouveaux résultats détectés !**")
-            
-            for result in new_results:
-                await moulibot.send_moulinette_notification(result)
-                
-            await ctx.send(f"✅ **{len(new_results)} notifications envoyées !**")
-        else:
-            await ctx.send("📊 **Aucun nouveau résultat détecté.**\nTous les résultats sont déjà connus.")
-            
-    except Exception as e:
-        await ctx.send(f"❌ **Erreur lors de la vérification:** {e}")
+# (Commande force_check supprimée - remplacée par la commande slash /force_check)
 
 
 if __name__ == "__main__":
