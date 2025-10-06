@@ -201,7 +201,8 @@ class MouliCordSlashCommands(commands.Cog):
     def update_epitech_api(self, new_api):
         """Met à jour l'instance de l'API Epitech"""
         self.epitech_api = new_api
-        print("🔄 API Epitech mise à jour dans le Cog")
+        # Log côté bot uniquement; éviter le bruit ici
+        pass
     
     async def get_results_with_fallback(self, year=2025):
         """Récupère les résultats avec fallback automatique vers les données locales en cas d'erreur API"""
@@ -211,11 +212,10 @@ class MouliCordSlashCommands(commands.Cog):
             return results, None  # results, error_message
         except Exception as api_err:
             api_error = str(api_err)
-            print(f"⚠️ Erreur API détectée: {api_error}")
             
             # Vérifier si c'est une erreur de token (403)
             if "403" in api_error or "Forbidden" in api_error:
-                print("🔄 Token expiré détecté, tentative de renouvellement...")
+                # Tentative silencieuse de renouvellement
                 
                 try:
                     import importlib
@@ -225,28 +225,23 @@ class MouliCordSlashCommands(commands.Cog):
                     if bot.ensure_valid_token() and bot.epitech_api:
                         self.epitech_api = bot.epitech_api
                         results = self.epitech_api.get_moulinette_results(year)
-                        print("✅ Token renouvelé et données récupérées")
                         return results, None
                     else:
-                        print("❌ Impossible de renouveler le token")
+                        pass
                 except Exception as refresh_err:
-                    print(f"❌ Erreur lors du renouvellement: {refresh_err}")
+                    pass
             
             # Fallback vers les données locales
-            print("📁 Utilisation des données locales en fallback...")
             try:
                 with open("results_history.json", "r") as f:
                     local_data = json.load(f)
                     results = local_data.get("results", [])
                     
                 if results:
-                    print(f"✅ {len(results)} résultats chargés depuis le cache local")
                     return results, f"Token expiré - Données du cache local"
                 else:
-                    print("❌ Aucune donnée locale disponible")
                     return None, api_error
             except Exception as local_err:
-                print(f"❌ Erreur lecture fichier local: {local_err}")
                 return None, api_error
 
     @app_commands.command(name="ping", description="🏓 Teste la latence du bot")
@@ -287,7 +282,7 @@ class MouliCordSlashCommands(commands.Cog):
             if not results:
                 embed = discord.Embed(
                     title="❌ Aucun résultat disponible",
-                    description="• ⚠️ **Token Epitech expiré** (durée de vie: 1h)\n• 📡 **API inaccessible** (403 Forbidden)\n• 💾 **Aucune donnée locale** disponible\n\n💡 **Solution:** Utilisez `/refresh_token` pour renouveler l'accès",
+                    description="• ⚠️ Token expiré (validité ~1h)\n• 📡 API inaccessible (403 Forbidden)\n• 💾 Aucune donnée locale disponible\n\n💡 Utilisez `/refresh_token` puis réessayez",
                     color=discord.Color.red()
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
@@ -298,16 +293,13 @@ class MouliCordSlashCommands(commands.Cog):
             
             # Créer l'embed manuellement (format_summary peut ne pas être disponible)
             embed = discord.Embed(
-                title=f"🏫 Résultats Moulinette ({len(limited_results)} derniers)",
+                title=f"📊 Résultats Moulinette ({len(limited_results)} derniers)",
                 color=discord.Color.green() if not error_msg else discord.Color.orange(),
                 timestamp=datetime.now()
             )
             
             # Indication de la source des données
-            if error_msg:
-                embed.description = f"⚠️ {error_msg}"
-            else:
-                embed.description = "🌐 Données en temps réel"
+            embed.description = "Source: 🌐 Temps réel" if not error_msg else "Source: 💾 Cache local (token expiré)"
             
             # Ajouter les résultats
             for result in limited_results:
@@ -331,9 +323,9 @@ class MouliCordSlashCommands(commands.Cog):
             
             # Footer avec info sur le token
             if error_msg:
-                embed.set_footer(text="⚠️ Mode dégradé - Utilisez /refresh_token pour les données récentes")
+                embed.set_footer(text="Mode dégradé • Utilisez /refresh_token pour des données récentes")
             else:
-                embed.set_footer(text="💾 Token expire dans ~1h • 🔄 Actualisation auto")
+                embed.set_footer(text="Token valide ~1h • Actualisation automatique")
             
             view = RefreshView(self.epitech_api, nombre)
             await interaction.followup.send(embed=embed, view=view)
@@ -358,7 +350,7 @@ class MouliCordSlashCommands(commands.Cog):
             if not results:
                 embed = discord.Embed(
                     title="❌ Aucun résultat disponible",
-                    description="• ⚠️ **Token Epitech expiré** (durée de vie: 1h)\n• 📡 **API inaccessible** (403 Forbidden)\n• 💾 **Aucune donnée locale** disponible\n\n💡 **Solution:** Utilisez `/refresh_token` pour renouveler l'accès",
+                    description="• ⚠️ Token expiré (validité ~1h)\n• 📡 API inaccessible (403 Forbidden)\n• 💾 Aucune donnée locale disponible\n\n💡 Utilisez `/refresh_token` puis réessayez",
                     color=discord.Color.red(),
                     timestamp=datetime.now()
                 )
@@ -383,7 +375,7 @@ class MouliCordSlashCommands(commands.Cog):
             view = ProjectDetailsView(results, self.epitech_api)
             
             # Indication de la source des données
-            source_info = "🌐 **Données en temps réel**" if not error_msg else "💾 **Données du cache local**"
+            source_info = "Source: 🌐 Temps réel" if not error_msg else "Source: 💾 Cache local (token expiré)"
             
             embed = discord.Embed(
                 title="🔍 Détails de Projet",
@@ -394,20 +386,20 @@ class MouliCordSlashCommands(commands.Cog):
             
             embed.add_field(
                 name="📋 Instructions",
-                value="• Utilisez le menu déroulant pour choisir un projet\n• Les détails s'afficheront automatiquement\n• Seuls les projets avec des résultats sont listés",
+                value="• Choisissez un projet via le menu\n• Les détails s'affichent automatiquement\n• Seuls les projets avec résultats sont listés",
                 inline=False
             )
             
             if error_msg:
                 embed.add_field(
                     name="⚠️ Mode dégradé",
-                    value="Token expiré - Données du cache local\nUtilisez `/refresh_token` pour les données récentes",
+                    value="Token expiré • Données depuis le cache local\nUtilisez `/refresh_token` pour des données récentes",
                     inline=False
                 )
             else:
                 embed.add_field(
-                    name="💾 Token",
-                    value="🔄 Expire dans ~1h\n⚠️ Actualisez si nécessaire",
+                    name="🔐 Token",
+                    value="Valide ~1h\nActualisez si nécessaire",
                     inline=False
                 )
             
@@ -433,8 +425,8 @@ class MouliCordSlashCommands(commands.Cog):
     async def watch_slash(self, interaction: discord.Interaction):
         """Slash command pour la surveillance"""
         embed = discord.Embed(
-            title="🔄 Surveillance Active",
-            description="✅ La surveillance automatique des nouveaux résultats est **toujours active**.\n\n📡 Vérification toutes les 10 minutes\n🔔 Notifications automatiques avec @everyone",
+            title="🔄 Surveillance active",
+            description="La surveillance des nouveaux résultats est active.\n\n📡 Vérification toutes les 5 minutes\n🔔 Notifications automatiques avec @everyone",
             color=discord.Color.green(),
             timestamp=datetime.now()
         )
@@ -524,8 +516,8 @@ class MouliCordSlashCommands(commands.Cog):
             
             if results:
                 embed = discord.Embed(
-                    title="✅ Vérification terminée",
-                    description=f"🔍 **{len(results)} projets** trouvés dans les résultats actuels",
+                    title="🔍 Vérification terminée",
+                    description=f"{len(results)} projet(s) trouvés dans les résultats actuels",
                     color=discord.Color.blue(),
                     timestamp=datetime.now()
                 )
@@ -545,8 +537,8 @@ class MouliCordSlashCommands(commands.Cog):
                     )
             else:
                 embed = discord.Embed(
-                    title="❌ Erreur de vérification",
-                    description="Impossible de récupérer les résultats de l'API",
+                    title="❌ Erreur",
+                    description="Récupération des résultats impossible",
                     color=discord.Color.red()
                 )
             
@@ -628,10 +620,18 @@ class MouliCordSlashCommands(commands.Cog):
             if top_projects:
                 top_text = ""
                 for i, project in enumerate(top_projects):
-                    module = project.get("module", "Inconnu")
+                    # Préférer le nom du projet si disponible
+                    project_info = project.get("project", {}) if isinstance(project.get("project"), dict) else {}
+                    project_name = project_info.get("name") if project_info else None
+                    # Fallback: code du module dans project.project.module.code ou ancienne clé "module"
+                    module_info = project_info.get("module", {}) if project_info else {}
+                    module_code = module_info.get("code") if isinstance(module_info, dict) else None
+                    legacy_module = project.get("module")
+                    display_name = project_name or module_code or legacy_module or "Projet inconnu"
+
                     rate = get_project_rate(project)
                     medals = ["🥇", "🥈", "🥉"]
-                    top_text += f"{medals[i]} `{module}` ({rate:.1f}%)\n"
+                    top_text += f"{medals[i]} `{display_name}` ({rate:.1f}%)\n"
                 
                 embed.add_field(
                     name="🏆 Top 3 Projets",
@@ -771,10 +771,20 @@ class MouliCordSlashCommands(commands.Cog):
             await interaction.followup.send(embed=embed, ephemeral=True)
             
             # Lancer l'actualisation avec Selenium
-            success = auto_refresh_token(headless=True, update_env=True)
+            # Ne jamais écrire le token dans des fichiers/env
+            success = auto_refresh_token(headless=True, update_env=False)
             
             if success:
                 # Vérifier le nouveau token
+                try:
+                    # Demander au bot de régénérer un token en mémoire et relier l'API
+                    import bot as bot_module
+                    if bot_module.ensure_valid_token() and getattr(bot_module, 'epitech_api', None):
+                        self.update_epitech_api(bot_module.epitech_api)
+                        print("🔗 Cog relié à la nouvelle instance EpitechAPI (mémoire) après refresh")
+                except Exception:
+                    pass
+
                 new_token_info = self.epitech_api.check_token_expiration()
                 
                 embed = discord.Embed(
@@ -1320,17 +1330,8 @@ class HelpView(discord.ui.View):
 
 async def setup(bot: commands.Bot):
     """Fonction pour charger le Cog"""
-    # Essayer d'utiliser le token de l'environnement ou un dummy token
-    env_token = os.getenv('EPITECH_API_TOKEN')
-    if env_token and env_token.strip():
-        token = env_token.strip()
-        if token.startswith("Bearer "):
-            token = token[7:].strip()
-        print(f"🔑 Utilisation du token .env: {token[:20]}...")
-    else:
-        token = "dummy_token"
-        print("⚠️ Aucun token .env, utilisation d'un token temporaire")
-    
+    # Ne jamais lire un token depuis l'environnement; initialiser avec un token temporaire
+    token = "dummy_token"
     try:
         epitech_api = EpitechAPI(token, "results_history.json")
         await bot.add_cog(MouliCordSlashCommands(bot, epitech_api))
