@@ -742,6 +742,60 @@ class MouliCordSlashCommands(commands.Cog):
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
+    @app_commands.command(name="logs", description="📋 Affiche les logs d'erreur des dernières moulinettes")
+    async def logs_slash(self, interaction: discord.Interaction):
+        """Slash command pour afficher les logs d'erreur des moulinettes"""
+        await interaction.response.defer(thinking=True)
+        
+        try:
+            # Récupérer tous les résultats avec fallback automatique
+            results, error_msg = await self.get_results_with_fallback(2025)
+            
+            if not results:
+                embed = discord.Embed(
+                    title="❌ Aucun résultat disponible",
+                    description="• ⚠️ Token expiré (validité ~1h)\n• 📡 API inaccessible (403 Forbidden)\n• 💾 Aucune donnée locale disponible\n\n💡 Utilisez `/token` puis cliquez sur 'Actualiser Token'",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+            
+            # Trier par date (plus récent en premier) et limiter à 25 pour le menu
+            results_sorted = sorted(results, key=lambda x: x.get("date", ""), reverse=True)
+            limited_results = results_sorted[:25]
+            
+            # Créer l'embed de sélection
+            embed = discord.Embed(
+                title="📋 Logs d'Erreur des Moulinettes",
+                description=f"**Sélectionnez une moulinette** pour voir les détails des erreurs.\n\n📊 **{len(limited_results)} moulinettes** disponibles",
+                color=discord.Color.blue(),
+                timestamp=datetime.now()
+            )
+            
+            embed.add_field(
+                name="🔍 Fonctionnalités",
+                value="• Messages d'erreur détaillés\n• Première tâche qui échoue\n• Détails des tests",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="📊 Informations",
+                value="• Troncature des erreurs\n• Navigation interactive\n• Détails complets",
+                inline=True
+            )
+            
+            # Créer la vue de sélection
+            logs_view = LogsSelectionView(self.epitech_api, limited_results)
+            await interaction.followup.send(embed=embed, view=logs_view, ephemeral=True)
+            
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Erreur",
+                description=f"Erreur lors de la récupération des logs:\n```{str(e)}```",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
     @app_commands.command(name="help", description="❓ Guide complet des commandes MouliCord")
     async def help_slash(self, interaction: discord.Interaction):
         """Slash command d'aide avec navigation par pages"""
@@ -820,9 +874,10 @@ class HistoryProjectSelect(discord.ui.Select):
         self.epitech_api = epitech_api
         self.projects_map = projects_map
         
-        # Créer les options pour le menu (max 25)
+        # Créer les options pour le menu (max 25) - triées dans l'ordre inverse
         options = []
-        for project_id, project_data in list(projects_map.items())[:25]:
+        sorted_projects = sorted(projects_map.items(), key=lambda x: x[0], reverse=True)
+        for project_id, project_data in sorted_projects:
             project_name = project_data["name"]
             module_code = project_data["module"]
             
@@ -1113,6 +1168,433 @@ class HistorySelect(discord.ui.Select):
             await interaction.followup.send(embed=embed, ephemeral=True)
 
 
+class LogsSelectionView(discord.ui.View):
+    """Vue pour la sélection de moulinette dans /logs"""
+    
+    def __init__(self, epitech_api: EpitechAPI, results: list):
+        super().__init__(timeout=300)
+        self.epitech_api = epitech_api
+        self.results = results
+        
+        # Ajouter le menu de sélection des moulinettes
+        self.add_item(LogsMoulinetteSelect(epitech_api, results))
+
+
+class LogsMoulinetteSelect(discord.ui.Select):
+    """Menu déroulant pour sélectionner une moulinette dans /logs"""
+    
+    def __init__(self, epitech_api: EpitechAPI, results: list):
+        self.epitech_api = epitech_api
+        self.results = results
+        
+        # Créer les options pour le menu (max 25)
+        options = []
+        for i, result in enumerate(results[:25]):
+            project = result.get("project", {})
+            project_name = project.get("name", "Projet inconnu")
+            date = result.get("date", "")
+            
+            # Formater la date
+            try:
+                dt = datetime.fromisoformat(date.replace('Z', '+00:00'))
+                date_str = dt.strftime("%d/%m/%Y %H:%M")
+            except:
+                date_str = date[:16] if len(date) > 16 else date
+            
+            # Calculer le score
+            skills = result.get("results", {}).get("skills", {})
+            total_tests = sum(skill.get("count", 0) for skill in skills.values())
+            total_passed = sum(skill.get("passed", 0) for skill in skills.values())
+            rate = (total_passed / total_tests * 100) if total_tests > 0 else 0
+            
+            # Tronquer le nom si trop long
+            display_name = project_name[:50] + "..." if len(project_name) > 50 else project_name
+            
+            # Choisir l'emoji selon le score
+            if rate >= 100:
+                emoji = "✅"
+            elif rate >= 80:
+                emoji = "🟡"
+            elif rate >= 50:
+                emoji = "🟠"
+            else:
+                emoji = "❌"
+            
+            options.append(discord.SelectOption(
+                label=f"{emoji} {display_name}",
+                description=f"{date_str} • {rate:.1f}%",
+                value=str(i)
+            ))
+        
+        super().__init__(
+            placeholder="📋 Choisissez une moulinette...",
+            options=options,
+            min_values=1,
+            max_values=1
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Traite la sélection de la moulinette"""
+        try:
+            moulinette_index = int(self.values[0])
+            moulinette_data = self.results[moulinette_index]
+            
+            await interaction.response.defer()
+            
+            # Récupérer les détails de la moulinette
+            test_run_id = moulinette_data.get("results", {}).get("testRunId")
+            if not test_run_id:
+                embed = discord.Embed(
+                    title="❌ Erreur",
+                    description="ID de test non trouvé pour cette moulinette",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+            
+            # Récupérer les détails via l'API
+            details = self.epitech_api.get_detailed_results(test_run_id)
+            
+            if not details:
+                # Fallback: utiliser les données de base
+                await self._show_basic_logs(interaction, moulinette_data)
+                return
+            
+            # Afficher les logs détaillés
+            await self._show_detailed_logs(interaction, moulinette_data, details)
+            
+        except (ValueError, IndexError):
+            embed = discord.Embed(
+                title="❌ Moulinette introuvable",
+                description="Impossible de récupérer les détails pour cette moulinette",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+                
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Erreur",
+                description=f"Erreur lors de la récupération des logs:\n```{str(e)}```",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+    
+    async def _show_basic_logs(self, interaction: discord.Interaction, moulinette_data: dict):
+        """Affiche les logs basiques quand les détails ne sont pas disponibles"""
+        project = moulinette_data.get("project", {})
+        project_name = project.get("name", "Projet inconnu")
+        skills = moulinette_data.get("results", {}).get("skills", {})
+        
+        # Trouver la première tâche qui échoue
+        first_failed_task = None
+        for task_name, task_data in skills.items():
+            task_passed = task_data.get("passed", 0)
+            task_count = task_data.get("count", 0)
+            task_crashed = task_data.get("crashed", 0)
+            task_mandatory_failed = task_data.get("mandatoryFailed", 0)
+            
+            # Une tâche échoue si : pas tous les tests passés, ou des tests crashés, ou des échecs obligatoires
+            if (task_passed < task_count and task_count > 0) or task_crashed > 0 or task_mandatory_failed > 0:
+                first_failed_task = {
+                    "name": task_name,
+                    "passed": task_passed,
+                    "count": task_count,
+                    "crashed": task_crashed,
+                    "mandatory_failed": task_mandatory_failed
+                }
+                break
+        
+        embed = discord.Embed(
+            title=f"📋 Logs - {project_name}",
+            description="Détails des erreurs de la moulinette",
+            color=discord.Color.orange(),
+            timestamp=datetime.now()
+        )
+        
+        if first_failed_task:
+            # Construire le message d'erreur selon le type d'échec
+            error_details = f"**{first_failed_task['name']}**\n"
+            error_details += f"Tests: {first_failed_task['passed']}/{first_failed_task['count']}\n"
+            
+            if first_failed_task['crashed'] > 0:
+                error_details += f"💥 **Crashed:** {first_failed_task['crashed']}\n"
+            if first_failed_task['mandatory_failed'] > 0:
+                error_details += f"🚫 **Mandatory Failed:** {first_failed_task['mandatory_failed']}\n"
+            
+            # Déterminer l'icône selon le type d'échec
+            if first_failed_task['crashed'] > 0:
+                icon = "💥"
+                error_type = "Tâche crashée"
+            elif first_failed_task['mandatory_failed'] > 0:
+                icon = "🚫"
+                error_type = "Échec obligatoire"
+            else:
+                icon = "❌"
+                error_type = "Tests échoués"
+            
+            embed.add_field(
+                name=f"{icon} {error_type}",
+                value=error_details,
+                inline=False
+            )
+            
+            # Ajouter un message pour les logs détaillés
+            embed.add_field(
+                name="🔍 Logs d'erreur",
+                value="Les logs détaillés ne sont pas disponibles en mode basique.\n"
+                      "Utilisez `/token` pour actualiser et obtenir les détails complets.",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="✅ Aucune erreur",
+                value="Toutes les tâches ont réussi",
+                inline=False
+            )
+        
+        # Résumé des compétences
+        skills_summary = []
+        for task_name, task_data in list(skills.items())[:10]:  # Limiter à 10
+            task_passed = task_data.get("passed", 0)
+            task_count = task_data.get("count", 0)
+            task_crashed = task_data.get("crashed", 0)
+            
+            if task_passed == task_count and task_count > 0:
+                icon = "✅"
+            elif task_crashed > 0:
+                icon = "💥"
+            elif task_passed > 0:
+                icon = "⚠️"
+            else:
+                icon = "❌"
+            
+            skills_summary.append(f"{icon} **{task_name}**: {task_passed}/{task_count}")
+        
+        if skills_summary:
+            embed.add_field(
+                name="📊 Résumé des tâches",
+                value="\n".join(skills_summary),
+                inline=False
+            )
+        
+        embed.set_footer(text="MouliCord • Logs basiques (détails non disponibles)")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    
+    def _extract_failed_task_output(self, output: str, task_name: str) -> str:
+        """Extrait uniquement la partie pertinente des logs d'erreur d'une tâche"""
+        if not output:
+            return ""
+        
+        # Nettoyer l'output (enlever les caractères de contrôle)
+        cleaned_output = output.replace('\x1b[0m', '').replace('\x1b[31m', '').replace('\x1b[32m', '').replace('\x1b[33m', '')
+        
+        # Diviser par lignes
+        lines = cleaned_output.split('\n')
+        
+        # Chercher la première tâche qui échoue (FAILURE)
+        failed_task_start = -1
+        for i, line in enumerate(lines):
+            if ": FAILURE" in line or "Test failed:" in line:
+                # Remonter pour trouver le début de la section de cette tâche
+                for j in range(i, max(0, i-20), -1):
+                    if "====" in lines[j] and ("task" in lines[j].lower() or "====" in lines[j]):
+                        failed_task_start = j
+                        break
+                break
+        
+        if failed_task_start == -1:
+            # Si on ne trouve pas de FAILURE, chercher la tâche spécifique par nom
+            task_name_short = task_name.split(' - ')[1] if ' - ' in task_name else task_name
+            for i, line in enumerate(lines):
+                if f"task{task_name_short}" in line and "====" in line:
+                    failed_task_start = i
+                    break
+            
+            if failed_task_start == -1:
+                return cleaned_output[:2000] + ("..." if len(cleaned_output) > 2000 else "")
+        
+        # Extraire la section de la tâche qui échoue
+        task_lines = []
+        
+        for i in range(failed_task_start, len(lines)):
+            line = lines[i]
+            task_lines.append(line)
+            
+            # Arrêter à la prochaine section de tâche ou à la fin
+            if i + 1 < len(lines) and "====" in lines[i + 1] and "task" in lines[i + 1].lower():
+                break
+        
+        # Filtrer pour ne garder que la partie "Executing all tests..." et les résultats d'erreur
+        filtered_lines = []
+        in_execution_section = False
+        
+        for line in task_lines:
+            if "# Executing all tests..." in line:
+                in_execution_section = True
+                filtered_lines.append(line)
+            elif in_execution_section:
+                # Garder toutes les lignes importantes, même vides
+                if not line.startswith("# Building...") and not line.startswith("# Checking for forbidden functions..."):
+                    filtered_lines.append(line)
+                # Ne pas s'arrêter à la première ligne qui commence par "#"
+                # Continuer jusqu'à la fin de la section de la tâche
+        
+        result = '\n'.join(filtered_lines)
+        
+        # Tronquer si trop long
+        if len(result) > 2000:
+            result = result[:2000] + "\n... (tronqué)"
+        
+        return result
+
+    async def _show_detailed_logs(self, interaction: discord.Interaction, moulinette_data: dict, details: dict):
+        """Affiche les logs détaillés avec les messages d'erreur"""
+        project = moulinette_data.get("project", {})
+        project_name = project.get("name", "Projet inconnu")
+        
+        # Utiliser les données de moulinette_data en priorité (comme les autres commandes)
+        skills = moulinette_data.get("results", {}).get("skills", {})
+        
+        # Si pas de skills dans moulinette_data, essayer de récupérer depuis les détails
+        if not skills:
+            results = details.get("results", {})
+            skills = results.get("skills", {})
+        
+        # Trouver la première tâche qui échoue
+        first_failed_task = None
+        for task_name, task_data in skills.items():
+            task_passed = task_data.get("passed", 0)
+            task_count = task_data.get("count", 0)
+            task_crashed = task_data.get("crashed", 0)
+            task_mandatory_failed = task_data.get("mandatoryFailed", 0)
+            
+            # Une tâche échoue si : pas tous les tests passés, ou des tests crashés, ou des échecs obligatoires
+            if (task_passed < task_count and task_count > 0) or task_crashed > 0 or task_mandatory_failed > 0:
+                first_failed_task = {
+                    "name": task_name,
+                    "passed": task_passed,
+                    "count": task_count,
+                    "crashed": task_crashed,
+                    "mandatory_failed": task_mandatory_failed,
+                    "tests": task_data.get("tests", [])
+                }
+                break
+        
+        embed = discord.Embed(
+            title=f"📋 Logs Détaillés - {project_name}",
+            description="Messages d'erreur de la moulinette",
+            color=discord.Color.red() if first_failed_task else discord.Color.green(),
+            timestamp=datetime.now()
+        )
+        
+        if first_failed_task:
+            # Construire le message d'erreur selon le type d'échec
+            error_details = f"**{first_failed_task['name']}**\n"
+            error_details += f"Tests: {first_failed_task['passed']}/{first_failed_task['count']}\n"
+            
+            if first_failed_task['crashed'] > 0:
+                error_details += f"💥 **Crashed:** {first_failed_task['crashed']}\n"
+            if first_failed_task['mandatory_failed'] > 0:
+                error_details += f"🚫 **Mandatory Failed:** {first_failed_task['mandatory_failed']}\n"
+            
+            # Déterminer l'icône selon le type d'échec
+            if first_failed_task['crashed'] > 0:
+                icon = "💥"
+                error_type = "Tâche crashée"
+            elif first_failed_task['mandatory_failed'] > 0:
+                icon = "🚫"
+                error_type = "Échec obligatoire"
+            else:
+                icon = "❌"
+                error_type = "Tests échoués"
+            
+            # Afficher les détails de la première tâche échouée
+            embed.add_field(
+                name=f"{icon} {error_type}",
+                value=error_details,
+                inline=False
+            )
+            
+            # Afficher les détails des tests échoués de la première tâche
+            failed_tests = []
+            
+            # Essayer de récupérer les logs depuis les détails de l'API
+            if details and "externalItems" in details:
+                external_items = details.get("externalItems", [])
+                
+                # Chercher l'item de type "trace-pool" qui contient les logs
+                for item in external_items:
+                    if item.get("type") == "trace-pool":
+                        trace_content = item.get("comment", "")
+                        
+                        # Extraire les logs de la tâche échouée
+                        cleaned_output = self._extract_failed_task_output(trace_content, first_failed_task['name'])
+                        if cleaned_output:
+                            failed_tests.append(f"```\n{cleaned_output}\n```")
+                        break
+            
+            # Si pas de logs trouvés, essayer depuis moulinette_data
+            if not failed_tests:
+                for test in first_failed_task.get("tests", []):
+                    if not test.get("passed", False):
+                        test_output = test.get("output", "")
+                        if test_output:
+                            cleaned_output = self._extract_failed_task_output(test_output, first_failed_task['name'])
+                            if cleaned_output:
+                                failed_tests.append(f"```\n{cleaned_output}\n```")
+                                break
+            
+            if failed_tests:
+                embed.add_field(
+                    name="🔍 Logs d'erreur de la première tâche",
+                    value="\n\n".join(failed_tests),
+                    inline=False
+                )
+            else:
+                # Si pas de détails de tests, afficher un message générique
+                embed.add_field(
+                    name="🔍 Détails de l'échec",
+                    value=f"Tâche **{first_failed_task['name']}** échouée\n"
+                          f"Tests passés: {first_failed_task['passed']}/{first_failed_task['count']}\n"
+                          f"Pour plus de détails, consultez le rapport complet sur EpiTest",
+                    inline=False
+                )
+        else:
+            embed.add_field(
+                name="✅ Aucune erreur",
+                value="Toutes les tâches ont réussi",
+                inline=False
+            )
+        
+        # Résumé des compétences
+        skills_summary = []
+        for task_name, task_data in list(skills.items())[:10]:  # Limiter à 10
+            task_passed = task_data.get("passed", 0)
+            task_count = task_data.get("count", 0)
+            task_crashed = task_data.get("crashed", 0)
+            
+            if task_passed == task_count and task_count > 0:
+                icon = "✅"
+            elif task_crashed > 0:
+                icon = "💥"
+            elif task_passed > 0:
+                icon = "⚠️"
+            else:
+                icon = "❌"
+            
+            skills_summary.append(f"{icon} **{task_name}**: {task_passed}/{task_count}")
+        
+        if skills_summary:
+            embed.add_field(
+                name="📊 Résumé des tâches",
+                value="\n".join(skills_summary),
+                inline=False
+            )
+        
+        embed.set_footer(text="MouliCord • Logs détaillés avec messages d'erreur")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 class HelpView(discord.ui.View):
     """Vue d'aide avec navigation par pages"""
     
@@ -1135,7 +1617,8 @@ class HelpView(discord.ui.View):
                 "fields": [
                     {"name": "`/results`", "value": "📊 Derniers résultats avec actualisation", "inline": False},
                     {"name": "`/history`", "value": "📈 Sélection projet + navigation", "inline": False},
-                    {"name": "`/stats`", "value": "📈 Statistiques complètes", "inline": False}
+                    {"name": "`/stats`", "value": "📈 Statistiques complètes", "inline": False},
+                    {"name": "`/logs`", "value": "📋 Logs d'erreur des moulinettes", "inline": False}
                 ]
             },
             {
