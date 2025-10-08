@@ -410,8 +410,13 @@ class MouliCordBot:
                 
             channel = bot.get_channel(simple_channel_id)
             if channel and isinstance(channel, discord.TextChannel):
-                await channel.send(message, embed=embed, allowed_mentions=discord.AllowedMentions(everyone=True))
-                print(f"📨 Notification simple avec embed envoyée dans le canal {simple_channel_id} pour: {project_name} à {time_str}")
+                sent_message = await channel.send(message, embed=embed, allowed_mentions=discord.AllowedMentions(everyone=True))
+                
+                # Ajouter les réactions
+                await sent_message.add_reaction("✅")  # Coche pour "vu/réussi"
+                await sent_message.add_reaction("❌")  # Croix pour "échec/attention"
+                
+                print(f"📨 Notification simple avec embed et réactions envoyée dans le canal {simple_channel_id} pour: {project_name} à {time_str}")
             else:
                 print(f"❌ Canal {simple_channel_id} non trouvé pour la notification simple")
             
