@@ -367,9 +367,63 @@ class MouliCordBot:
         else:
             print(f"Canal {channel_id} non trouvé ou non compatible")
     
+    async def send_simple_notification(self, result: dict):
+        """Envoie une notification simple avec nom du projet, heure et ping du rôle"""
+        try:
+            # Extraire les informations du résultat
+            project_name = result.get("project", {}).get("name", "Projet inconnu")
+            date = result.get("date", "")
+            
+            # Formater la date relative (format Discord "il y a X heures")
+            if date:
+                try:
+                    # Parser la date UTC
+                    dt_utc = datetime.fromisoformat(date.replace('Z', '+00:00'))
+                    # Créer le timestamp Discord
+                    timestamp = int(dt_utc.timestamp())
+                    time_str = f"<t:{timestamp}:R>"
+                except:
+                    time_str = "Heure inconnue"
+            else:
+                time_str = "Heure inconnue"
+            
+            # Créer l'embed de notification simple
+            embed = discord.Embed(
+                title=f"📢 {project_name}",
+                description=f"**🕒 Date :** {time_str}",
+                color=discord.Color.blue(),
+                timestamp=datetime.fromisoformat(date.replace('Z', '+00:00')) if date else datetime.now()
+            )
+            
+            embed.set_footer(text="MouliCord • Notification simple")
+            
+            # Message avec ping du rôle
+            message = f"<@&1424827053508657252>"
+            
+            # Envoyer dans le canal spécifique pour les notifications simples (configurable via .env)
+            simple_channel_id = os.getenv('SIMPLE_NOTIFICATION_CHANNEL_ID', '1425583449150062592')
+            try:
+                simple_channel_id = int(simple_channel_id)
+            except ValueError:
+                print(f"❌ SIMPLE_NOTIFICATION_CHANNEL_ID invalide: {simple_channel_id}")
+                return
+                
+            channel = bot.get_channel(simple_channel_id)
+            if channel and isinstance(channel, discord.TextChannel):
+                await channel.send(message, embed=embed, allowed_mentions=discord.AllowedMentions(everyone=True))
+                print(f"📨 Notification simple avec embed envoyée dans le canal {simple_channel_id} pour: {project_name} à {time_str}")
+            else:
+                print(f"❌ Canal {simple_channel_id} non trouvé pour la notification simple")
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de l'envoi de la notification simple: {e}")
+
     async def send_moulinette_notification(self, result: dict):
         """Envoie une notification pour un nouveau résultat de moulinette"""
         try:
+            # Envoyer d'abord la notification simple
+            await self.send_simple_notification(result)
+            
             # Extraire les informations du résultat
             project_name = result.get("project", {}).get("name", "Projet inconnu")
             project_slug = result.get("project", {}).get("slug", "")
@@ -453,11 +507,11 @@ class MouliCordBot:
             
             embed.set_footer(text="MouliCord v2.0 • Surveillance automatique")
             
-            # Envoyer la notification avec @everyone pour les nouveaux résultats
+            # Envoyer la notification détaillée avec @everyone pour les nouveaux résultats
             message = f"<@&1424827053508657252> 🚨 **NOUVEAU RÉSULTAT DE MOULINETTE !**"
             
             await self.send_to_channel(message, embed)
-            print(f"📨 Notification envoyée pour: {project_name} ({percentage}%)")
+            print(f"📨 Notification détaillée envoyée pour: {project_name} ({percentage}%)")
             
         except Exception as e:
             print(f"❌ Erreur lors de l'envoi de la notification: {e}")

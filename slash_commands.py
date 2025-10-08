@@ -5,6 +5,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 import json
 import base64
+import csv
+import io
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
 from epitech_api import EpitechAPI
 from token_refresher import auto_refresh_token
 import os
@@ -796,12 +803,259 @@ class MouliCordSlashCommands(commands.Cog):
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
+    @app_commands.command(name="export", description="📊 Exporte vos données en CSV, JSON ou PDF")
+    @app_commands.choices(format=[
+        app_commands.Choice(name="CSV", value="csv"),
+        app_commands.Choice(name="JSON", value="json"),
+        app_commands.Choice(name="PDF", value="pdf")
+    ])
+    async def export_slash(self, interaction: discord.Interaction, format: str = "csv"):
+        """Slash command pour exporter les données"""
+        await interaction.response.defer(thinking=True)
+        
+        try:
+            # Récupérer les résultats
+            results, error_msg = await self.get_results_with_fallback(2025)
+            
+            if not results:
+                embed = discord.Embed(
+                    title="❌ Aucun résultat disponible",
+                    description="• ⚠️ Token expiré (validité ~1h)\n• 📡 API inaccessible (403 Forbidden)\n• 💾 Aucune donnée locale disponible\n\n💡 Utilisez `/token` puis cliquez sur 'Actualiser Token'",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+            
+            # Préparer les données pour l'export
+            export_data = []
+            for result in results:
+                # Extraire les informations de base depuis différentes structures possibles
+                project_name = result.get("projectName") or result.get("project", {}).get("name") or "N/A"
+                module_code = result.get("moduleCode") or result.get("project", {}).get("module", {}).get("code") or "N/A"
+                date = result.get("date", "N/A")
+                
+                # Extraire le score depuis différentes sources
+                score = result.get("score", 0)
+                if score == 0:
+                    # Essayer de calculer le score depuis les skills
+                    skills = result.get("results", {}).get("skills", {})
+                    if skills:
+                        total_tasks = 0
+                        passed_tasks = 0
+                        for skill_data in skills.values():
+                            if isinstance(skill_data, dict):
+                                count = skill_data.get("count", 0)
+                                passed = skill_data.get("passed", 0)
+                                total_tasks += count
+                                passed_tasks += passed
+                        if total_tasks > 0:
+                            score = int((passed_tasks / total_tasks) * 100)
+                
+                status = result.get("status", "N/A")
+                
+                # Extraire les détails des skills
+                skills = result.get("results", {}).get("skills", {})
+                total_tasks = 0
+                passed_tasks = 0
+                failed_tasks = 0
+                
+                for skill_name, skill_data in skills.items():
+                    if isinstance(skill_data, dict):
+                        count = skill_data.get("count", 0)
+                        passed = skill_data.get("passed", 0)
+                        total_tasks += count
+                        passed_tasks += passed
+                        failed_tasks += (count - passed)
+                
+                export_data.append({
+                    "Date": date,
+                    "Module": module_code,
+                    "Projet": project_name,
+                    "Score": score,
+                    "Statut": status,
+                    "Tâches Total": total_tasks,
+                    "Tâches Réussies": passed_tasks,
+                    "Tâches Échouées": failed_tasks,
+                    "Taux de Réussite": f"{(passed_tasks/total_tasks*100):.1f}%" if total_tasks > 0 else "0%"
+                })
+            
+            # Trier par date (plus récentes en premier)
+            export_data.sort(key=lambda x: x["Date"], reverse=True)
+            
+            # Créer le fichier selon le format demandé
+            if format.lower() == "csv":
+                # Créer le CSV
+                output = io.StringIO()
+                writer = csv.DictWriter(output, fieldnames=export_data[0].keys())
+                writer.writeheader()
+                writer.writerows(export_data)
+                file_content = output.getvalue()
+                file_extension = "csv"
+                mime_type = "text/csv"
+            elif format.lower() == "pdf":
+                # Créer le PDF
+                file_content = self._generate_pdf_report(export_data)
+                file_extension = "pdf"
+                mime_type = "application/pdf"
+            else:  # JSON
+                file_content = json.dumps(export_data, indent=2, ensure_ascii=False)
+                file_extension = "json"
+                mime_type = "application/json"
+            
+            # Créer le fichier Discord
+            if format.lower() == "pdf":
+                file = discord.File(io.BytesIO(file_content), 
+                                  filename=f"moulicord_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{file_extension}")
+            else:
+                file = discord.File(io.BytesIO(file_content.encode('utf-8')), 
+                                  filename=f"moulicord_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{file_extension}")
+            
+            embed = discord.Embed(
+                title="📊 Export terminé",
+                description=f"Vos données ont été exportées en format **{format.upper()}**\n\n"
+                           f"📈 **{len(export_data)}** entrées exportées\n"
+                           f"📅 Du {export_data[-1]['Date']} au {export_data[0]['Date']}",
+                color=discord.Color.green()
+            )
+            
+            await interaction.followup.send(embed=embed, file=file, ephemeral=True)
+            
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Erreur d'export",
+                description=f"Erreur lors de l'export: {str(e)}",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
     @app_commands.command(name="help", description="❓ Guide complet des commandes MouliCord")
     async def help_slash(self, interaction: discord.Interaction):
         """Slash command d'aide avec navigation par pages"""
         
         view = HelpView()
         await interaction.response.send_message(embed=view.get_embed(), view=view, ephemeral=True)
+
+    def _generate_pdf_report(self, export_data: list) -> bytes:
+        """Génère un rapport PDF des données exportées"""
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
+        
+        # Styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            spaceAfter=30,
+            alignment=1,  # Centré
+            textColor=colors.HexColor('#2E86AB')
+        )
+        
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=16,
+            spaceAfter=12,
+            textColor=colors.HexColor('#A23B72')
+        )
+        
+        # Contenu du PDF
+        story = []
+        
+        # Titre
+        story.append(Paragraph("📊 Rapport MouliCord", title_style))
+        story.append(Spacer(1, 12))
+        
+        # Informations générales
+        total_entries = len(export_data)
+        if export_data:
+            avg_score = sum(int(row["Score"]) for row in export_data if row["Score"] != "N/A") / len([r for r in export_data if r["Score"] != "N/A"])
+            date_range = f"Du {export_data[-1]['Date'][:10]} au {export_data[0]['Date'][:10]}"
+        else:
+            avg_score = 0
+            date_range = "Aucune donnée"
+        
+        story.append(Paragraph(f"<b>Résumé des performances</b>", heading_style))
+        story.append(Paragraph(f"• <b>Total des entrées:</b> {total_entries}", styles['Normal']))
+        story.append(Paragraph(f"• <b>Score moyen:</b> {avg_score:.1f}%", styles['Normal']))
+        story.append(Paragraph(f"• <b>Période:</b> {date_range}", styles['Normal']))
+        story.append(Spacer(1, 20))
+        
+        # Tableau des données
+        if export_data:
+            story.append(Paragraph("<b>Détails des moulinettes</b>", heading_style))
+            
+            # Préparer les données du tableau
+            table_data = [["Date", "Module", "Projet", "Score", "Tâches", "Réussite"]]
+            
+            for row in export_data[:50]:  # Limiter à 50 entrées pour éviter les PDF trop longs
+                date_str = row["Date"][:10] if row["Date"] != "N/A" else "N/A"
+                module = row["Module"][:15] + "..." if len(row["Module"]) > 15 else row["Module"]
+                project = row["Projet"][:20] + "..." if len(row["Projet"]) > 20 else row["Projet"]
+                score = str(row["Score"]) + "%" if row["Score"] != "N/A" else "N/A"
+                tasks = f"{row['Tâches Réussies']}/{row['Tâches Total']}"
+                success_rate = row["Taux de Réussite"]
+                
+                table_data.append([date_str, module, project, score, tasks, success_rate])
+            
+            # Créer le tableau
+            table = Table(table_data, colWidths=[1.2*inch, 1.2*inch, 1.8*inch, 0.8*inch, 0.8*inch, 1*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E86AB')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+            ]))
+            
+            story.append(table)
+            story.append(Spacer(1, 20))
+        
+        # Statistiques par performance
+        if export_data:
+            story.append(Paragraph("<b>Répartition par performance</b>", heading_style))
+            
+            excellent = len([r for r in export_data if int(r["Score"]) >= 90])
+            good = len([r for r in export_data if 70 <= int(r["Score"]) < 90])
+            average = len([r for r in export_data if 50 <= int(r["Score"]) < 70])
+            poor = len([r for r in export_data if int(r["Score"]) < 50])
+            
+            stats_data = [
+                ["Performance", "Nombre", "Pourcentage"],
+                ["🟢 Excellent (≥90%)", str(excellent), f"{(excellent/total_entries*100):.1f}%"],
+                ["🟡 Bon (70-89%)", str(good), f"{(good/total_entries*100):.1f}%"],
+                ["🟠 Moyen (50-69%)", str(average), f"{(average/total_entries*100):.1f}%"],
+                ["🔴 À améliorer (<50%)", str(poor), f"{(poor/total_entries*100):.1f}%"]
+            ]
+            
+            stats_table = Table(stats_data, colWidths=[2*inch, 1*inch, 1*inch])
+            stats_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#A23B72')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 9)
+            ]))
+            
+            story.append(stats_table)
+        
+        # Pied de page
+        story.append(Spacer(1, 30))
+        story.append(Paragraph(f"<i>Rapport généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')} par MouliCord</i>", styles['Normal']))
+        
+        # Construire le PDF
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
 
 
 # VIEWS ET COMPOSANTS INTERACTIFS
@@ -1380,6 +1634,28 @@ class LogsMoulinetteSelect(discord.ui.Select):
         embed.set_footer(text="MouliCord • Logs basiques (détails non disponibles)")
         await interaction.followup.send(embed=embed, ephemeral=True)
     
+    def _get_performance_color(self, score: int) -> discord.Color:
+        """Retourne une couleur selon le score de performance"""
+        if score >= 90:
+            return discord.Color.green()
+        elif score >= 70:
+            return discord.Color.yellow()
+        elif score >= 50:
+            return discord.Color.orange()
+        else:
+            return discord.Color.red()
+    
+    def _get_performance_emoji(self, score: int) -> str:
+        """Retourne un emoji selon le score de performance"""
+        if score >= 90:
+            return "🟢"
+        elif score >= 70:
+            return "🟡"
+        elif score >= 50:
+            return "🟠"
+        else:
+            return "🔴"
+
     def _extract_failed_task_output(self, output: str, task_name: str) -> str:
         """Extrait uniquement la partie pertinente des logs d'erreur d'une tâche"""
         if not output:
@@ -1595,6 +1871,148 @@ class LogsMoulinetteSelect(discord.ui.Select):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
+class PaginatedResultsView(discord.ui.View):
+    """Vue avec pagination pour les résultats"""
+    
+    def __init__(self, results: list, page_size: int = 10):
+        super().__init__(timeout=300)
+        self.results = results
+        self.page_size = page_size
+        self.current_page = 0
+        self.max_pages = (len(results) - 1) // page_size + 1
+        
+        # Mettre à jour les boutons
+        self.update_buttons()
+    
+    def update_buttons(self):
+        """Met à jour l'état des boutons de pagination"""
+        self.clear_items()
+        
+        # Bouton Précédent
+        prev_button = discord.ui.Button(
+            label="⬅️ Précédent",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.current_page == 0
+        )
+        prev_button.callback = self.previous_page
+        self.add_item(prev_button)
+        
+        # Bouton Page actuelle
+        page_button = discord.ui.Button(
+            label=f"📄 {self.current_page + 1}/{self.max_pages}",
+            style=discord.ButtonStyle.primary,
+            disabled=True
+        )
+        self.add_item(page_button)
+        
+        # Bouton Suivant
+        next_button = discord.ui.Button(
+            label="Suivant ➡️",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.current_page >= self.max_pages - 1
+        )
+        next_button.callback = self.next_page
+        self.add_item(next_button)
+    
+    def get_current_page_results(self):
+        """Retourne les résultats de la page actuelle"""
+        start = self.current_page * self.page_size
+        end = start + self.page_size
+        return self.results[start:end]
+    
+    async def previous_page(self, interaction: discord.Interaction):
+        """Page précédente"""
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.update_buttons()
+            await self.update_embed(interaction)
+    
+    async def next_page(self, interaction: discord.Interaction):
+        """Page suivante"""
+        if self.current_page < self.max_pages - 1:
+            self.current_page += 1
+            self.update_buttons()
+            await self.update_embed(interaction)
+    
+    async def update_embed(self, interaction: discord.Interaction):
+        """Met à jour l'embed avec la page actuelle"""
+        # Cette méthode sera surchargée par les classes filles
+        pass
+
+class HistoryPaginatedView(PaginatedResultsView):
+    """Vue paginée pour l'historique des projets"""
+    
+    def __init__(self, epitech_api: EpitechAPI, projects_list: list):
+        super().__init__(projects_list, page_size=15)
+        self.epitech_api = epitech_api
+    
+    def get_embed(self):
+        """Retourne l'embed pour la page actuelle"""
+        current_projects = self.get_current_page_results()
+        
+        # Calculer les statistiques globales
+        total_projects = len(self.results)
+        avg_score = sum(p.get("avg_score", 0) for p in self.results) / len(self.results) if self.results else 0
+        
+        # Couleur dynamique basée sur la moyenne
+        color = self._get_performance_color(int(avg_score))
+        
+        embed = discord.Embed(
+            title="📈 Historique des Projets",
+            description=f"**Page {self.current_page + 1}/{self.max_pages}** • {len(current_projects)} projets affichés\n\n"
+                       f"📊 **{total_projects} projets** au total • Moyenne: **{avg_score:.1f}%**",
+            color=color,
+            timestamp=datetime.now()
+        )
+        
+        # Ajouter les projets de la page actuelle
+        for i, project in enumerate(current_projects, start=self.current_page * self.page_size + 1):
+            project_name = project.get("name", "N/A")
+            module_code = project.get("module", "N/A")
+            avg_score = project.get("avg_score", 0)
+            total_runs = project.get("total_runs", 0)
+            
+            # Emoji et couleur selon la performance
+            emoji = self._get_performance_emoji(int(avg_score))
+            
+            embed.add_field(
+                name=f"{emoji} {i}. {project_name}",
+                value=f"**Module:** {module_code}\n"
+                      f"**Score moyen:** {avg_score:.1f}%\n"
+                      f"**Moulinettes:** {total_runs}",
+                inline=True
+            )
+        
+        embed.set_footer(text="MouliCord • Navigation avec les boutons ci-dessous")
+        return embed
+    
+    def _get_performance_color(self, score: int) -> discord.Color:
+        """Retourne une couleur selon le score de performance"""
+        if score >= 90:
+            return discord.Color.green()
+        elif score >= 70:
+            return discord.Color.yellow()
+        elif score >= 50:
+            return discord.Color.orange()
+        else:
+            return discord.Color.red()
+    
+    def _get_performance_emoji(self, score: int) -> str:
+        """Retourne un emoji selon le score de performance"""
+        if score >= 90:
+            return "🟢"
+        elif score >= 70:
+            return "🟡"
+        elif score >= 50:
+            return "🟠"
+        else:
+            return "🔴"
+    
+    async def update_embed(self, interaction: discord.Interaction):
+        """Met à jour l'embed avec la page actuelle"""
+        embed = self.get_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
 class HelpView(discord.ui.View):
     """Vue d'aide avec navigation par pages"""
     
@@ -1616,9 +2034,10 @@ class HelpView(discord.ui.View):
                 "description": "**Commandes essentielles pour surveiller vos résultats:**",
                 "fields": [
                     {"name": "`/results`", "value": "📊 Derniers résultats avec actualisation", "inline": False},
-                    {"name": "`/history`", "value": "📈 Sélection projet + navigation", "inline": False},
+                    {"name": "`/history`", "value": "📈 Sélection projet + pagination + couleurs dynamiques", "inline": False},
                     {"name": "`/stats`", "value": "📈 Statistiques complètes", "inline": False},
-                    {"name": "`/logs`", "value": "📋 Logs d'erreur des moulinettes", "inline": False}
+                    {"name": "`/logs`", "value": "📋 Logs d'erreur des moulinettes", "inline": False},
+                    {"name": "`/export`", "value": "📊 Export des données en CSV/JSON/PDF", "inline": False}
                 ]
             },
             {

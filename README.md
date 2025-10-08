@@ -83,6 +83,9 @@ pip install discord.py python-dotenv requests selenium webdriver-manager
 # Créer le fichier .env
 DISCORD_BOT_TOKEN=your_discord_bot_token
 CHANNEL_ID=your_discord_channel_id
+
+# Optionnel : Canal pour les notifications simples (par défaut: 1425583449150062592)
+SIMPLE_NOTIFICATION_CHANNEL_ID=your_simple_notification_channel_id
 ```
 
 **Note :** Le token Epitech est généré automatiquement au démarrage (validité ~1h)
